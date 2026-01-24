@@ -1,0 +1,74 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Zenj - Calm & Capable AI</title>
+    
+    <!-- PWA -->
+    <link rel="manifest" href="/assets/manifest-BdvzOPHf.json" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0b141a" />
+    
+    <!-- OpenGraph Tags -->
+    <meta property="og:title" id="og-title" content="Zenj - Calm & Capable AI" />
+    <meta property="og:description" id="og-description" content="Chat with Zenj, your minimalist AI companion. Real-time voice, video, and image generation." />
+    <meta property="og:image" id="og-image" content="https://api.dicebear.com/7.x/bottts/svg?seed=Zenj&backgroundColor=00a884" />
+    <meta property="og:url" content="https://zenj.ai" />
+    <meta property="og:type" content="website" />
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "socket.io-client": "https://esm.sh/socket.io-client@^4.8.1",
+    "express": "https://esm.sh/express@^5.2.1",
+    "http": "https://esm.sh/http@^0.0.1-security",
+    "socket.io": "https://esm.sh/socket.io@^4.8.3",
+    "cors": "https://esm.sh/cors@^2.8.6",
+    "fs": "https://esm.sh/fs@^0.0.1-security",
+    "path": "https://esm.sh/path@^0.12.7",
+    "url": "https://esm.sh/url@^0.11.4"
+  }
+}
+</script>
+  <script type="module" crossorigin src="/assets/index-CoL4w9Rc.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-B8KmIZE4.css">
+</head>
+  <body>
+    <div id="root"></div>
+    <script>
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        try {
+          navigator.serviceWorker.getRegistrations().then(registrations => {
+            if (registrations && registrations.length > 0) {
+              for (let registration of registrations) {
+                registration.unregister();
+              }
+            }
+          }).catch(err => console.debug('SW cleanup deferred:', err.message));
+        } catch (e) {
+          console.debug('SW access restricted');
+        }
+      }
+
+      window.deferredPrompt = null;
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        window.deferredPrompt = e;
+        window.dispatchEvent(new Event('pwa-install-available'));
+      });
+    </script>
+</body>
+</html>
