@@ -1,8 +1,0 @@
-{
-  "name": "Zenj Chat",
-  "description": "A minimalist, high-performance chat application powered by Gemini, featuring real-time search, image generation, and a calming zen-inspired interface.",
-  "requestFramePermissions": [
-    "camera",
-    "microphone"
-  ]
-}
