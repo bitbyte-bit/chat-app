@@ -143,7 +143,6 @@ const initDb = async () => {
       settings_json TEXT,
       status TEXT
     );
-    ALTER TABLE profile ADD COLUMN status TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS contacts (
       id TEXT PRIMARY KEY,
