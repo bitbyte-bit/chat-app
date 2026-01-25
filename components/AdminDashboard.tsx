@@ -1,14 +1,15 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  BarChart3, Users, MessageSquare, ShieldAlert, 
-  Search, UserMinus, Send, 
+import {
+  BarChart3, Users, MessageSquare, ShieldAlert,
+  Search, UserMinus, Send,
   ShieldCheck, ArrowLeft, RefreshCw, Eye,
   Lock, X, Package, Plus, Trash2, Camera, FileUp, Cpu, Terminal,
-  Ban, ShieldQuestion, AlertTriangle, CheckCircle, Loader2, AlertCircle, HardDriveDownload
+  Ban, ShieldQuestion, AlertTriangle, CheckCircle, Loader2, AlertCircle, HardDriveDownload, Edit3
 } from 'lucide-react';
 import { Contact, AccountStatus, Message, ZenjTool } from '../types';
 import { dbQuery, dbRun, saveDatabase } from '../services/database';
+import { useNotification } from './NotificationProvider';
 
 interface AdminDashboardProps {
   onBack: () => void;
@@ -18,16 +19,42 @@ interface AdminDashboardProps {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, loadTools }) => {
-  const [activeTab, setActiveTab] = useState<'users' | 'tools' | 'broadcast' | 'register'>('users');
+  const { showNotification, confirm } = useNotification();
+  const [activeTab, setActiveTab] = useState<'users' | 'tools' | 'broadcast' | 'register' | 'messages' | 'notifications' | 'performance'>('users');
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [users, setUsers] = useState<Contact[]>([]);
   const [tools, setTools] = useState<ZenjTool[]>([]);
   const [installs, setInstalls] = useState(0);
+  const [messageCount, setMessageCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddingTool, setIsAddingTool] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [conflictModal, setConflictModal] = useState<{ isOpen: boolean; tool: any } | null>(null);
+  const [editingTool, setEditingTool] = useState<ZenjTool | null>(null);
+  const [viewingUser, setViewingUser] = useState<any | null>(null);
+  const [userMessages, setUserMessages] = useState<Message[]>([]);
+  const [allMessages, setAllMessages] = useState<Message[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [performanceMetrics, setPerformanceMetrics] = useState<any[]>([]);
+
+  const handleEditTool = async () => {
+    if (!editingTool) return;
+    await dbRun("UPDATE tools SET name = ?, description = ?, version = ?, iconUrl = ?, fileUrl = ?, fileName = ? WHERE id = ?", [
+      editingTool.name, editingTool.description, editingTool.version, editingTool.iconUrl, editingTool.fileUrl, editingTool.fileName, editingTool.id
+    ]);
+    setEditingTool(null);
+    loadData();
+  };
+
+  const handleViewUser = async (userId: string) => {
+    const user = users.find(u => u.id === userId);
+    if (user) {
+      setViewingUser(user);
+      const messages = await dbQuery("SELECT * FROM messages WHERE contact_id = ? ORDER BY timestamp DESC LIMIT 50", [userId]);
+      setUserMessages(messages as Message[]);
+    }
+  };
 
   const [newTool, setNewTool] = useState({
     name: '',
@@ -53,10 +80,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = async () => {
-    const [dirUsers, toolList, metrics] = await Promise.all([
+    const [dirUsers, toolList, metrics, messageCount, messages, notifs] = await Promise.all([
       dbQuery("SELECT * FROM directory_users"),
       loadTools(),
-      dbQuery("SELECT val FROM system_metrics WHERE id = 'installs'")
+      dbQuery("SELECT val FROM system_metrics WHERE id = 'installs'"),
+      dbQuery("SELECT COUNT(*) as count FROM messages"),
+      dbQuery("SELECT * FROM messages ORDER BY timestamp DESC LIMIT 100"),
+      fetch('/api/notifications').then(r => r.json()).catch(() => []),
+      fetch('/api/metrics').then(r => r.json()).catch(() => [])
     ]);
 
     setUsers((dirUsers as any[]).map(u => ({
@@ -66,6 +97,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
     })));
     setTools(toolList as ZenjTool[]);
     if (metrics && metrics.length > 0) setInstalls(metrics[0].val);
+    setMessageCount((messageCount as any[])[0]?.count || 0);
+    setAllMessages(messages as Message[]);
+    setNotifications(notifs);
+    setPerformanceMetrics(metrics);
   };
 
   useEffect(() => {
@@ -77,8 +112,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
   const stats = useMemo(() => {
     const total = users.length;
     const online = users.filter(u => u.status === 'online').length;
-    return { total, online, installs, toolCount: tools.length };
-  }, [users, installs, tools]);
+    const warned = users.filter(u => u.accountStatus === 'warned').length;
+    return { total, online, installs, toolCount: tools.length, warned, messages: messageCount };
+  }, [users, installs, tools, messageCount]);
 
   const filteredUsers = users.filter(u => 
     u.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -86,7 +122,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
   );
 
   const handleUpdateStatus = async (userId: string, status: AccountStatus) => {
-    if (!confirm(`Are you sure you want to set status to ${status}?`)) return;
+    if (!(await confirm(`Are you sure you want to set status to ${status}?`))) return;
     const badge = status === 'warned' ? '⚠️' : status === 'suspended' ? '🚫' : status === 'banned' ? '⛔' : '';
     await dbRun("UPDATE directory_users SET accountStatus = ?, statusBadge = ? WHERE id = ?", [status, badge, userId]);
     loadData();
@@ -187,32 +223,120 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
           <p className="text-[#8696a0] text-[10px] uppercase font-bold tracking-widest">Real-time Performance & Manifestation</p>
         </div>
         <div className="flex bg-[#111b21] rounded-xl p-1 border border-white/5">
-           <button onClick={() => setActiveTab('users')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'users' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Users</button>
-           <button onClick={() => setActiveTab('register')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'register' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Register</button>
-           <button onClick={() => setActiveTab('broadcast')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'broadcast' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Broadcast</button>
-           <button onClick={() => setActiveTab('tools')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'tools' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Lab</button>
-        </div>
+            <button onClick={() => setActiveTab('users')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'users' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Users</button>
+            <button onClick={() => setActiveTab('register')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'register' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Register</button>
+            <button onClick={() => setActiveTab('messages')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'messages' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Messages</button>
+            <button onClick={() => setActiveTab('notifications')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'notifications' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Notifications</button>
+            <button onClick={() => setActiveTab('performance')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'performance' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Performance</button>
+            <button onClick={() => setActiveTab('broadcast')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'broadcast' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Broadcast</button>
+            <button onClick={() => setActiveTab('tools')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'tools' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Lab</button>
+         </div>
+         <button onClick={() => saveDatabase()} className="p-3 bg-[#00a884] text-black rounded-2xl hover:bg-[#06cf9c] transition-all"><HardDriveDownload size={20} /></button>
       </header>
 
       <div className="flex-1 overflow-y-auto no-scrollbar p-6 space-y-6">
         {activeTab === 'users' ? (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
               <div className="bg-[#111b21] p-4 rounded-[24px] border border-white/5 shadow-xl">
-                <div className="text-[#8696a0] text-[10px] font-bold uppercase mb-1">Online Presence</div>
+                <Users className="text-[#00a884] mb-2" size={24} />
+                <div className="text-[#8696a0] text-[10px] font-bold uppercase mb-1">Online</div>
                 <div className="text-3xl font-bold text-[#00a884] font-outfit">{stats.online}</div>
               </div>
               <div className="bg-[#111b21] p-4 rounded-[24px] border border-white/5 shadow-xl">
-                <div className="text-[#8696a0] text-[10px] font-bold uppercase mb-1">Total Souls</div>
+                <Users className="text-white mb-2" size={24} />
+                <div className="text-[#8696a0] text-[10px] font-bold uppercase mb-1">Total</div>
                 <div className="text-3xl font-bold text-white font-outfit">{stats.total}</div>
               </div>
               <div className="bg-[#111b21] p-4 rounded-[24px] border border-white/5 shadow-xl">
-                <div className="text-[#8696a0] text-[10px] font-bold uppercase mb-1">Tools Active</div>
+                <ShieldAlert className="text-amber-500 mb-2" size={24} />
+                <div className="text-[#8696a0] text-[10px] font-bold uppercase mb-1">Warned</div>
+                <div className="text-3xl font-bold text-amber-500 font-outfit">{stats.warned}</div>
+              </div>
+              <div className="bg-[#111b21] p-4 rounded-[24px] border border-white/5 shadow-xl">
+                <MessageSquare className="text-blue-500 mb-2" size={24} />
+                <div className="text-[#8696a0] text-[10px] font-bold uppercase mb-1">Messages</div>
+                <div className="text-3xl font-bold text-blue-500 font-outfit">{stats.messages}</div>
+              </div>
+              <div className="bg-[#111b21] p-4 rounded-[24px] border border-white/5 shadow-xl">
+                <Terminal className="text-amber-500 mb-2" size={24} />
+                <div className="text-[#8696a0] text-[10px] font-bold uppercase mb-1">Tools</div>
                 <div className="text-3xl font-bold text-amber-500 font-outfit">{stats.toolCount}</div>
               </div>
               <div className="bg-[#111b21] p-4 rounded-[24px] border border-white/5 shadow-xl">
+                <HardDriveDownload className="text-rose-500 mb-2" size={24} />
                 <div className="text-[#8696a0] text-[10px] font-bold uppercase mb-1">Installs</div>
                 <div className="text-3xl font-bold text-rose-500 font-outfit">{stats.installs}</div>
+              </div>
+            </div>
+
+            {/* Bar Chart */}
+            <div className="bg-[#111b21] rounded-[32px] border border-white/5 p-6 shadow-2xl">
+              <div className="flex items-center gap-3 mb-6">
+                <BarChart3 className="text-[#00a884]" size={24} />
+                <h3 className="text-white font-bold font-outfit">System Analytics</h3>
+              </div>
+              <div className="grid grid-cols-6 gap-4">
+                <div className="text-center">
+                  <div className="text-[#8696a0] text-xs font-bold uppercase mb-2">Online</div>
+                  <div className="h-32 bg-[#0b141a] rounded-lg flex items-end justify-center p-2">
+                    <div
+                      className="bg-[#00a884] rounded w-full transition-all duration-500"
+                      style={{ height: `${Math.min((stats.online / Math.max(stats.total, 1)) * 100, 100)}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-[#00a884] font-bold mt-2">{stats.online}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[#8696a0] text-xs font-bold uppercase mb-2">Total</div>
+                  <div className="h-32 bg-[#0b141a] rounded-lg flex items-end justify-center p-2">
+                    <div
+                      className="bg-white rounded w-full transition-all duration-500"
+                      style={{ height: `${Math.min((stats.total / Math.max(stats.total, 1)) * 100, 100)}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-white font-bold mt-2">{stats.total}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[#8696a0] text-xs font-bold uppercase mb-2">Warned</div>
+                  <div className="h-32 bg-[#0b141a] rounded-lg flex items-end justify-center p-2">
+                    <div
+                      className="bg-amber-500 rounded w-full transition-all duration-500"
+                      style={{ height: `${Math.min((stats.warned / Math.max(stats.total, 1)) * 100, 100)}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-amber-500 font-bold mt-2">{stats.warned}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[#8696a0] text-xs font-bold uppercase mb-2">Messages</div>
+                  <div className="h-32 bg-[#0b141a] rounded-lg flex items-end justify-center p-2">
+                    <div
+                      className="bg-blue-500 rounded w-full transition-all duration-500"
+                      style={{ height: `${Math.min((stats.messages / Math.max(stats.messages + 100, 1)) * 100, 100)}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-blue-500 font-bold mt-2">{stats.messages}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[#8696a0] text-xs font-bold uppercase mb-2">Tools</div>
+                  <div className="h-32 bg-[#0b141a] rounded-lg flex items-end justify-center p-2">
+                    <div
+                      className="bg-amber-500 rounded w-full transition-all duration-500"
+                      style={{ height: `${Math.min((stats.toolCount / Math.max(stats.toolCount + 10, 1)) * 100, 100)}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-amber-500 font-bold mt-2">{stats.toolCount}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[#8696a0] text-xs font-bold uppercase mb-2">Installs</div>
+                  <div className="h-32 bg-[#0b141a] rounded-lg flex items-end justify-center p-2">
+                    <div
+                      className="bg-rose-500 rounded w-full transition-all duration-500"
+                      style={{ height: `${Math.min((stats.installs / Math.max(stats.installs + 10, 1)) * 100, 100)}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-rose-500 font-bold mt-2">{stats.installs}</div>
+                </div>
               </div>
             </div>
 
@@ -254,9 +378,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
                           <span className="text-[10px] text-[#8696a0] block truncate">{u.email || u.id}</span>
                         </div>
                         <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                           <button onClick={() => handleViewUser(u.id)} className="p-2.5 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500 hover:text-black transition-all"><Eye size={18} /></button>
                            <button onClick={() => handleUpdateStatus(u.id, 'active')} className="p-2.5 bg-emerald-500/10 text-emerald-500 rounded-xl hover:bg-emerald-500 hover:text-black transition-all"><CheckCircle size={18} /></button>
                            <button onClick={() => handleUpdateStatus(u.id, 'warned')} className="p-2.5 bg-amber-500/10 text-amber-500 rounded-xl hover:bg-amber-500 hover:text-black transition-all"><AlertTriangle size={18} /></button>
                            <button onClick={() => handleUpdateStatus(u.id, 'suspended')} className="p-2.5 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-black transition-all"><UserMinus size={18} /></button>
+                           <button onClick={() => handleUpdateStatus(u.id, 'banned')} className="p-2.5 bg-gray-500/10 text-gray-500 rounded-xl hover:bg-gray-500 hover:text-black transition-all"><Lock size={18} /></button>
                         </div>
                       </div>
                     ))
@@ -377,7 +503,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
                   <button
                     onClick={async () => {
                       if (!newUser.name || !newUser.email || !newUser.password) {
-                        alert('Name, email, and password are required');
+                        showNotification('Name, email, and password are required', [], 'error');
                         return;
                       }
 
@@ -398,13 +524,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
                           })]
                         );
 
+                        // Sync to user discovery
+                        await dbRun(
+                          "INSERT INTO directory_users (id, name, email, avatar, bio, status, accountStatus, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                          [userId, newUser.name, newUser.email, avatar, newUser.bio || '', 'offline', 'active', '']
+                        );
+
                         // Generate profile link
                         const profileLink = `${window.location.origin}?profile=${userId}`;
 
                         // Copy to clipboard
                         navigator.clipboard.writeText(profileLink);
 
-                        alert(`User created successfully! Profile link copied to clipboard:\n${profileLink}`);
+                        showNotification(`User created successfully! Profile link copied to clipboard:\n${profileLink}`, [], 'success');
 
                         setNewUser({
                           name: '',
@@ -420,13 +552,204 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
                         loadData();
                       } catch (error) {
                         console.error('Error creating user:', error);
-                        alert('Error creating user. Please try again.');
+                        showNotification('Error creating user. Please try again.', [], 'error');
                       }
                     }}
                     className="flex-1 bg-[#00a884] text-black font-bold py-3 px-6 rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-xl shadow-[#00a884]/20"
                   >
                     Create User & Generate Link
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : activeTab === 'messages' ? (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            <div className="flex justify-between items-center">
+              <h3 className="text-[#00a884] font-bold font-outfit text-2xl flex items-center gap-3">
+                <MessageSquare size={32} /> Message Audit
+              </h3>
+            </div>
+            <div className="bg-[#111b21] rounded-[32px] border border-white/5 overflow-hidden flex flex-col h-[600px] shadow-2xl">
+              <div className="p-6 border-b border-white/5">
+                <h4 className="text-white font-bold text-xl font-outfit">Recent Messages</h4>
+              </div>
+              <div className="flex-1 overflow-y-auto divide-y divide-white/5">
+                {allMessages.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center opacity-30">
+                    <MessageSquare size={64} className="mb-4" />
+                    <p className="font-outfit uppercase tracking-widest text-xs">No messages found</p>
+                  </div>
+                ) : (
+                  allMessages.map(m => (
+                    <div key={m.id} className="flex items-center gap-4 p-5 hover:bg-white/5 transition-colors">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white block truncate">{m.role}</span>
+                          <span className="text-[10px] text-[#8696a0]">{new Date(m.timestamp).toLocaleString()}</span>
+                        </div>
+                        <span className="text-[12px] text-[#8696a0] block truncate">{m.content}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        ) : activeTab === 'notifications' ? (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            <div className="flex justify-between items-center">
+              <h3 className="text-[#00a884] font-bold font-outfit text-2xl flex items-center gap-3">
+                <AlertTriangle size={32} /> Notification Center
+              </h3>
+              <button onClick={() => setNotifications([...notifications, { id: `temp-${Date.now()}`, title: '', message: '', type: 'info', active: true }])} className="p-3 bg-[#00a884] text-black rounded-2xl hover:bg-[#06cf9c] transition-all"><Plus size={20} /></button>
+            </div>
+            <div className="space-y-4">
+              {notifications.map(notif => (
+                <div key={notif.id} className="bg-[#111b21] rounded-[24px] p-6 border border-white/5">
+                  <div className="flex items-start gap-4">
+                    <div className="flex-1 space-y-4">
+                      <input
+                        type="text"
+                        placeholder="Notification Title"
+                        value={notif.title}
+                        onChange={(e) => setNotifications(notifications.map(n => n.id === notif.id ? { ...n, title: e.target.value } : n))}
+                        className="w-full bg-[#202c33] border border-white/10 rounded-2xl px-4 py-3 text-white placeholder-[#8696a0] focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all"
+                      />
+                      <textarea
+                        placeholder="Notification Message"
+                        value={notif.message}
+                        onChange={(e) => setNotifications(notifications.map(n => n.id === notif.id ? { ...n, message: e.target.value } : n))}
+                        className="w-full bg-[#202c33] border border-white/10 rounded-2xl px-4 py-3 text-white placeholder-[#8696a0] focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all resize-none"
+                        rows={3}
+                      />
+                      <div className="flex items-center gap-4">
+                        <select
+                          value={notif.type}
+                          onChange={(e) => setNotifications(notifications.map(n => n.id === notif.id ? { ...n, type: e.target.value } : n))}
+                          className="bg-[#202c33] border border-white/10 rounded-2xl px-4 py-2 text-white focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all"
+                        >
+                          <option value="info">Info</option>
+                          <option value="warning">Warning</option>
+                          <option value="success">Success</option>
+                          <option value="error">Error</option>
+                        </select>
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={notif.active}
+                            onChange={(e) => setNotifications(notifications.map(n => n.id === notif.id ? { ...n, active: e.target.checked } : n))}
+                          />
+                          <span className="text-[#8696a0] text-sm">Active</span>
+                        </label>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {notif.id.startsWith('temp-') ? (
+                        <button onClick={async () => {
+                          const res = await fetch('/api/notifications', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ title: notif.title, message: notif.message, type: notif.type })
+                          });
+                          if (res.ok) {
+                            loadData();
+                          }
+                        }} className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl hover:bg-emerald-500 hover:text-black transition-all"><CheckCircle size={18} /></button>
+                      ) : (
+                        <button onClick={async () => {
+                          const res = await fetch(`/api/notifications/${notif.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ title: notif.title, message: notif.message, type: notif.type, active: notif.active })
+                          });
+                          if (res.ok) {
+                            loadData();
+                          }
+                        }} className="p-2 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500 hover:text-black transition-all"><Edit3 size={18} /></button>
+                      )}
+                      <button onClick={async () => {
+                        const res = await fetch(`/api/notifications/${notif.id}`, { method: 'DELETE' });
+                        if (res.ok) {
+                          loadData();
+                        }
+                      }} className="p-2 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-black transition-all"><Trash2 size={18} /></button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : activeTab === 'performance' ? (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            <div className="flex justify-between items-center">
+              <h3 className="text-[#00a884] font-bold font-outfit text-2xl flex items-center gap-3">
+                <BarChart3 size={32} /> Performance Analytics
+              </h3>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Response Time Chart */}
+              <div className="bg-[#111b21] rounded-[32px] border border-white/5 p-6 shadow-2xl">
+                <h4 className="text-white font-bold text-xl font-outfit mb-4">Response Times (ms)</h4>
+                <div className="h-64 flex items-end justify-between gap-2">
+                  {performanceMetrics.filter(m => m.metric_name === 'response_time').slice(0, 10).reverse().map((m, i) => (
+                    <div key={i} className="flex-1 flex flex-col items-center">
+                      <div
+                        className="bg-[#00a884] rounded-t w-full transition-all duration-500"
+                        style={{ height: `${Math.min((m.value / 1000) * 100, 100)}%` }}
+                      ></div>
+                      <span className="text-xs text-[#8696a0] mt-2">{new Date(m.timestamp).toLocaleDateString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* User Activity Chart */}
+              <div className="bg-[#111b21] rounded-[32px] border border-white/5 p-6 shadow-2xl">
+                <h4 className="text-white font-bold text-xl font-outfit mb-4">User Activity</h4>
+                <div className="h-64 flex items-end justify-between gap-2">
+                  {performanceMetrics.filter(m => m.metric_name === 'user_activity').slice(0, 10).reverse().map((m, i) => (
+                    <div key={i} className="flex-1 flex flex-col items-center">
+                      <div
+                        className="bg-blue-500 rounded-t w-full transition-all duration-500"
+                        style={{ height: `${Math.min(m.value * 10, 100)}%` }}
+                      ></div>
+                      <span className="text-xs text-[#8696a0] mt-2">{new Date(m.timestamp).toLocaleDateString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Memory Usage Line Chart */}
+              <div className="bg-[#111b21] rounded-[32px] border border-white/5 p-6 shadow-2xl">
+                <h4 className="text-white font-bold text-xl font-outfit mb-4">Memory Usage (MB)</h4>
+                <div className="h-64 relative">
+                  <svg className="w-full h-full" viewBox="0 0 400 200">
+                    <polyline
+                      fill="none"
+                      stroke="#00a884"
+                      strokeWidth="2"
+                      points={
+                        performanceMetrics.filter(m => m.metric_name === 'memory_usage').slice(0, 20).reverse().map((m, i) => `${(i / 19) * 400},${200 - (m.value / 100) * 200}`).join(' ')
+                      }
+                    />
+                  </svg>
+                </div>
+              </div>
+
+              {/* Error Rate Chart */}
+              <div className="bg-[#111b21] rounded-[32px] border border-white/5 p-6 shadow-2xl">
+                <h4 className="text-white font-bold text-xl font-outfit mb-4">Error Rate (%)</h4>
+                <div className="h-64 flex items-end justify-between gap-2">
+                  {performanceMetrics.filter(m => m.metric_name === 'error_rate').slice(0, 10).reverse().map((m, i) => (
+                    <div key={i} className="flex-1 flex flex-col items-center">
+                      <div
+                        className="bg-rose-500 rounded-t w-full transition-all duration-500"
+                        style={{ height: `${Math.min(m.value * 100, 100)}%` }}
+                      ></div>
+                      <span className="text-xs text-[#8696a0] mt-2">{new Date(m.timestamp).toLocaleDateString()}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -457,12 +780,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
                   <button
                     onClick={() => {
                       if (!broadcastMessage.trim()) {
-                        alert('Please enter a message to broadcast');
+                        showNotification('Please enter a message to broadcast', [], 'error');
                         return;
                       }
                       onBroadcast(broadcastMessage.trim());
                       setBroadcastMessage('');
-                      alert('Message broadcasted successfully!');
+                      showNotification('Message broadcasted successfully!', [], 'success');
                     }}
                     className="flex-1 bg-[#00a884] text-black font-bold py-3 px-6 rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-xl shadow-[#00a884]/20 flex items-center justify-center gap-2"
                   >
@@ -502,7 +825,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
                     <div key={tool.id} className="bg-[#111b21] border border-white/5 rounded-[32px] p-6 shadow-2xl relative group overflow-hidden">
                        <div className="flex items-start justify-between mb-4">
                           <img src={tool.iconUrl} className="w-14 h-14 rounded-2xl border border-white/10 shadow-lg object-cover" alt="" />
-                          <button onClick={() => dbRun("DELETE FROM tools WHERE id = ?", [tool.id]).then(loadData)} className="p-2 text-[#8696a0] hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all"><Trash2 size={18} /></button>
+                          <div className="flex gap-2">
+                            <button onClick={() => setEditingTool(tool)} className="p-2 text-[#8696a0] hover:text-[#00a884] hover:bg-[#00a884]/10 rounded-xl transition-all"><Edit3 size={18} /></button>
+                            <button onClick={() => dbRun("DELETE FROM tools WHERE id = ?", [tool.id]).then(loadData)} className="p-2 text-[#8696a0] hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all"><Trash2 size={18} /></button>
+                          </div>
                        </div>
                        <h4 className="text-white font-bold text-lg font-outfit">{tool.name}</h4>
                        <p className="text-[#8696a0] text-xs mt-1 mb-4 line-clamp-2 h-8">{tool.description}</p>
@@ -581,6 +907,90 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
                  )}
               </div>
            </div>
+        </div>
+      )}
+
+      {editingTool && (
+        <div className="fixed inset-0 z-[200] bg-black/95 flex flex-col p-6 animate-in slide-in-from-bottom duration-300 safe-top safe-bottom overflow-hidden">
+          <div className="flex justify-between items-center mb-6 max-w-lg mx-auto w-full">
+            <button onClick={() => setEditingTool(null)} className="text-[#8696a0] hover:text-white p-2 bg-white/5 rounded-full"><X size={28} /></button>
+            <h3 className="text-white text-xl font-bold font-outfit">Edit Tool</h3>
+            <div className="w-10"></div>
+          </div>
+
+          <div className="flex-1 flex flex-col items-center justify-center max-w-lg mx-auto w-full overflow-y-auto no-scrollbar pb-10">
+            <div className="w-full bg-[#202c33] rounded-[48px] p-8 shadow-2xl border border-white/10 space-y-6">
+              <div className="flex gap-6">
+                <div onClick={() => iconInputRef.current?.click()} className="w-24 h-24 bg-[#0b141a] rounded-[32px] border border-white/5 flex items-center justify-center cursor-pointer group shrink-0 relative overflow-hidden">
+                  {editingTool.iconUrl ? <img src={editingTool.iconUrl} className="w-full h-full object-cover" alt="" /> : <Camera size={32} className="text-[#3b4a54] group-hover:text-amber-500" />}
+                  <input type="file" ref={iconInputRef} onChange={(e) => { const f = e.target.files?.[0]; if(f) { const r = new FileReader(); r.onloadend = () => setEditingTool({...editingTool, iconUrl: r.result as string}); r.readAsDataURL(f); } }} accept="image/*" className="hidden" />
+                </div>
+                <div className="flex-1 space-y-4">
+                  <input type="text" placeholder="Tool Identity" value={editingTool.name} onChange={(e) => setEditingTool({...editingTool, name: e.target.value})} className="w-full bg-[#0b141a] border border-white/5 rounded-2xl py-3 px-5 text-white font-bold outline-none focus:border-amber-500/50" />
+                  <input type="text" placeholder="Version (1.0.0)" value={editingTool.version} onChange={(e) => setEditingTool({...editingTool, version: e.target.value})} className="w-full bg-[#0b141a] border border-white/5 rounded-2xl py-3 px-5 text-amber-500 font-mono text-xs outline-none focus:border-amber-500/50" />
+                </div>
+              </div>
+              <textarea placeholder="Technical description..." value={editingTool.description} onChange={(e) => setEditingTool({...editingTool, description: e.target.value})} className="w-full h-24 bg-[#0b141a] border border-white/5 rounded-2xl py-4 px-6 text-[#d1d7db] outline-none resize-none text-sm" />
+              <button onClick={handleEditTool} className="w-full bg-amber-500 text-black py-5 rounded-[28px] font-black text-lg shadow-2xl shadow-amber-500/30 transition-all">Update Tool</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewingUser && (
+        <div className="fixed inset-0 z-[200] bg-black/95 flex flex-col p-6 animate-in slide-in-from-bottom duration-300 safe-top safe-bottom overflow-hidden">
+          <div className="flex justify-between items-center mb-6 max-w-lg mx-auto w-full">
+            <button onClick={() => setViewingUser(null)} className="text-[#8696a0] hover:text-white p-2 bg-white/5 rounded-full"><X size={28} /></button>
+            <h3 className="text-white text-xl font-bold font-outfit">User Details</h3>
+            <div className="w-10"></div>
+          </div>
+          <div className="flex-1 flex flex-col items-center justify-center max-w-lg mx-auto w-full overflow-y-auto no-scrollbar pb-10">
+            <div className="w-full bg-[#202c33] rounded-[48px] p-8 shadow-2xl border border-white/10 space-y-6">
+              <div className="flex items-center gap-4">
+                <img src={viewingUser.avatar} className="w-16 h-16 rounded-2xl border border-white/10" alt="" />
+                <div>
+                  <h4 className="text-white font-bold text-xl font-outfit">{viewingUser.name}</h4>
+                  <span className={`text-sm px-2 py-0.5 rounded ${viewingUser.accountStatus === 'active' ? 'bg-emerald-500/10 text-emerald-500' : viewingUser.accountStatus === 'warned' ? 'bg-amber-500/10 text-amber-500' : 'bg-rose-500/10 text-rose-500'}`}>{viewingUser.accountStatus}</span>
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[#8696a0] text-sm font-bold">Email</label>
+                  <p className="text-white">{viewingUser.email || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-[#8696a0] text-sm font-bold">Phone</label>
+                  <p className="text-white">{viewingUser.phone || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-[#8696a0] text-sm font-bold">Bio</label>
+                  <p className="text-white">{viewingUser.bio || 'No bio'}</p>
+                </div>
+                <div>
+                  <label className="text-[#8696a0] text-sm font-bold">Status</label>
+                  <p className="text-white">{viewingUser.status || 'offline'}</p>
+                </div>
+              </div>
+              <div>
+                <label className="text-[#8696a0] text-sm font-bold mb-2 block">Recent Messages</label>
+                <div className="max-h-40 overflow-y-auto space-y-2">
+                  {userMessages.length === 0 ? (
+                    <p className="text-[#8696a0] text-sm">No messages</p>
+                  ) : (
+                    userMessages.slice(0, 10).map(m => (
+                      <div key={m.id} className="bg-[#111b21] p-3 rounded-lg">
+                        <div className="flex justify-between items-start">
+                          <span className="text-white text-sm font-bold">{m.role}</span>
+                          <span className="text-[#8696a0] text-xs">{new Date(m.timestamp).toLocaleString()}</span>
+                        </div>
+                        <p className="text-[#8696a0] text-sm mt-1">{m.content}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

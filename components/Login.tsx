@@ -1,7 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Lock, ArrowRight, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Sparkles, Lock, ArrowRight, Eye, EyeOff, Loader2, UserPlus, Key, CheckCircle, XCircle } from 'lucide-react';
 import { UserProfile } from '../types';
+import { useNotification } from './NotificationProvider';
+import { dbQuery, dbRun } from '../services/database';
+import { deriveKeyFromPassword } from '../services/crypto';
 
 interface LoginProps {
   profile: UserProfile;
@@ -10,14 +13,26 @@ interface LoginProps {
    * like cryptographic key derivation during the login process.
    */
   onLogin: (password: string) => boolean | Promise<boolean>;
+  onRegister?: (data: any) => void;
 }
 
-const Login: React.FC<LoginProps> = ({ profile, onLogin }) => {
+const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
+  const { confirm, showNotification } = useNotification();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isProfileLink, setIsProfileLink] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [showCreateAccount, setShowCreateAccount] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotPhone, setForgotPhone] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [generatedResetCode, setGeneratedResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [newAccount, setNewAccount] = useState({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
+  const [passwordStrength, setPasswordStrength] = useState(0);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -37,6 +52,20 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin }) => {
       document.title = `Welcome to Zenj - ${profile.name}`;
     }
   }, [profile]);
+
+  const calculatePasswordStrength = (pwd: string) => {
+    let strength = 0;
+    if (pwd.length >= 8) strength++;
+    if (/[a-z]/.test(pwd)) strength++;
+    if (/[A-Z]/.test(pwd)) strength++;
+    if (/[0-9]/.test(pwd)) strength++;
+    if (/[^A-Za-z0-9]/.test(pwd)) strength++;
+    return strength;
+  };
+
+  useEffect(() => {
+    setPasswordStrength(calculatePasswordStrength(newAccount.password));
+  }, [newAccount.password]);
 
   /**
    * handleLogin is now async to properly await the result of onLogin,
@@ -60,6 +89,115 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin }) => {
       console.error('Login error:', err);
       setError(true);
       setIsLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!forgotEmail || !forgotPhone) {
+      showNotification('Please enter both email and phone.', [], 'error');
+      return;
+    }
+    try {
+      const response = await fetch('/api/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail, phone: forgotPhone })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setGeneratedResetCode(data.code);
+        showNotification(`Reset code sent: ${data.code} (In production, this would be emailed/SMS)`, [], 'info');
+      } else {
+        if (data.error === 'Account not found') {
+          showNotification('Account not found. Redirecting to create new account.', [], 'error');
+          setShowForgotPassword(false);
+          setShowCreateAccount(true);
+        } else {
+          showNotification(data.error, [], 'error');
+        }
+      }
+    } catch (err) {
+      showNotification('Error retrieving account.', [], 'error');
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetCode || !newPassword || !confirmPassword) {
+      showNotification('Please fill all fields.', [], 'error');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showNotification('Passwords do not match.', [], 'error');
+      return;
+    }
+    if (resetCode !== generatedResetCode) {
+      showNotification('Invalid reset code.', [], 'error');
+      return;
+    }
+    try {
+      const response = await fetch('/api/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail, phone: forgotPhone, newPassword })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        showNotification('Password reset successfully!', [], 'success');
+        setShowForgotPassword(false);
+        setResetCode('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setGeneratedResetCode('');
+      } else {
+        showNotification(data.error, [], 'error');
+      }
+    } catch (err) {
+      showNotification('Error resetting password.', [], 'error');
+    }
+  };
+
+  const handleCreateAccount = async () => {
+    if (!newAccount.name || !newAccount.email || !newAccount.phone || !newAccount.password || !newAccount.confirmPassword) {
+      showNotification('All fields are required.', [], 'error');
+      return;
+    }
+    if (newAccount.password !== newAccount.confirmPassword) {
+      showNotification('Passwords do not match.', [], 'error');
+      return;
+    }
+    if (passwordStrength < 3) {
+      showNotification('Password is too weak. Please use a stronger password.', [], 'error');
+      return;
+    }
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newAccount.email)) {
+      showNotification('Please enter a valid email address.', [], 'error');
+      return;
+    }
+    // Basic phone validation (simple check for digits)
+    const phoneRegex = /^\+?[\d\s\-\(\)]+$/;
+    if (!phoneRegex.test(newAccount.phone)) {
+      showNotification('Please enter a valid phone number.', [], 'error');
+      return;
+    }
+    try {
+      const response = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newAccount)
+      });
+      const data = await response.json();
+      if (response.ok) {
+        showNotification('Account created successfully!', [], 'success');
+        setShowCreateAccount(false);
+        setNewAccount({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
+        // Optionally, auto-login or redirect
+      } else {
+        showNotification(data.error, [], 'error');
+      }
+    } catch (err) {
+      showNotification('Error creating account.', [], 'error');
     }
   };
 
@@ -117,12 +255,192 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin }) => {
           </button>
         </form>
 
-        <button 
-          onClick={() => { if(confirm("This will erase all data. Proceed?")) { localStorage.clear(); window.location.reload(); } }}
-          className="text-[#8696a0] text-xs font-medium hover:text-white transition-colors"
-        >
-          Not you? Reset this presence
-        </button>
+        <div className="flex gap-4 justify-center">
+          <button
+            onClick={() => setShowCreateAccount(true)}
+            className="text-[#00a884] text-xs font-medium hover:text-white transition-colors flex items-center gap-1"
+          >
+            <UserPlus size={12} /> Create New Account
+          </button>
+          <button
+            onClick={() => setShowForgotPassword(true)}
+            className="text-[#00a884] text-xs font-medium hover:text-white transition-colors flex items-center gap-1"
+          >
+            <Key size={12} /> Forgot Password
+          </button>
+        </div>
+
+        {/* Forgot Password Modal */}
+        {showForgotPassword && (
+          <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-6">
+            <div className="bg-[#111b21] rounded-2xl p-6 w-full max-w-sm space-y-4">
+              <h3 className="text-white font-bold text-lg text-center">Forgot Password</h3>
+              {!generatedResetCode ? (
+                <>
+                  <p className="text-[#8696a0] text-sm text-center">Enter your email and phone to receive a reset code.</p>
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+                  />
+                  <input
+                    type="tel"
+                    placeholder="Phone"
+                    value={forgotPhone}
+                    onChange={(e) => setForgotPhone(e.target.value)}
+                    className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+                  />
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowForgotPassword(false)}
+                      className="flex-1 bg-[#202c33] text-white py-3 rounded-xl"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleForgotPassword}
+                      className="flex-1 bg-[#00a884] text-black font-bold py-3 rounded-xl"
+                    >
+                      Send Code
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-[#8696a0] text-sm text-center">Enter the reset code and your new password.</p>
+                  <input
+                    type="text"
+                    placeholder="Reset Code"
+                    value={resetCode}
+                    onChange={(e) => setResetCode(e.target.value)}
+                    className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+                  />
+                  <input
+                    type="password"
+                    placeholder="New Password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+                  />
+                  <input
+                    type="password"
+                    placeholder="Confirm New Password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+                  />
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setShowForgotPassword(false);
+                        setGeneratedResetCode('');
+                        setResetCode('');
+                        setNewPassword('');
+                        setConfirmPassword('');
+                      }}
+                      className="flex-1 bg-[#202c33] text-white py-3 rounded-xl"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleResetPassword}
+                      className="flex-1 bg-[#00a884] text-black font-bold py-3 rounded-xl"
+                    >
+                      Reset Password
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Create Account Modal */}
+        {showCreateAccount && (
+          <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-6">
+            <div className="bg-[#111b21] rounded-2xl p-6 w-full max-w-sm space-y-4">
+              <h3 className="text-white font-bold text-lg text-center">Create New Account</h3>
+              <input
+                type="text"
+                placeholder="Name"
+                value={newAccount.name}
+                onChange={(e) => setNewAccount({...newAccount, name: e.target.value})}
+                className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+              />
+              <input
+                type="email"
+                placeholder="Email"
+                value={newAccount.email}
+                onChange={(e) => setNewAccount({...newAccount, email: e.target.value})}
+                className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+              />
+              <input
+                type="tel"
+                placeholder="Phone"
+                value={newAccount.phone}
+                onChange={(e) => setNewAccount({...newAccount, phone: e.target.value})}
+                className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+              />
+              <div className="space-y-2">
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={newAccount.password}
+                  onChange={(e) => setNewAccount({...newAccount, password: e.target.value})}
+                  className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+                />
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 bg-[#202c33] rounded-full h-2">
+                    <div
+                      className={`h-2 rounded-full transition-all ${
+                        passwordStrength === 0 ? 'bg-gray-500 w-0' :
+                        passwordStrength === 1 ? 'bg-red-500 w-1/5' :
+                        passwordStrength === 2 ? 'bg-orange-500 w-2/5' :
+                        passwordStrength === 3 ? 'bg-yellow-500 w-3/5' :
+                        passwordStrength === 4 ? 'bg-blue-500 w-4/5' :
+                        'bg-green-500 w-full'
+                      }`}
+                    ></div>
+                  </div>
+                  <span className="text-xs text-[#8696a0]">
+                    {passwordStrength === 0 ? 'Very Weak' :
+                     passwordStrength === 1 ? 'Weak' :
+                     passwordStrength === 2 ? 'Fair' :
+                     passwordStrength === 3 ? 'Good' :
+                     passwordStrength === 4 ? 'Strong' :
+                     'Very Strong'}
+                  </span>
+                </div>
+              </div>
+              <input
+                type="password"
+                placeholder="Confirm Password"
+                value={newAccount.confirmPassword}
+                onChange={(e) => setNewAccount({...newAccount, confirmPassword: e.target.value})}
+                className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowCreateAccount(false);
+                    setNewAccount({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
+                  }}
+                  className="flex-1 bg-[#202c33] text-white py-3 rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateAccount}
+                  className="flex-1 bg-[#00a884] text-black font-bold py-3 rounded-xl"
+                >
+                  Create
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

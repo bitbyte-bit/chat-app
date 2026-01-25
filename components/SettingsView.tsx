@@ -37,6 +37,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   const [profileSaved, setProfileSaved] = useState(false);
   const [installable, setInstallable] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const wallpaperInputRef = useRef<HTMLInputElement>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -61,6 +62,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => setEditedProfile({ ...editedProfile, avatar: reader.result as string });
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleWallpaperChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => onUpdateSettings({ wallpaper: reader.result as string });
       reader.readAsDataURL(file);
     }
   };
@@ -168,15 +178,19 @@ const SettingsView: React.FC<SettingsViewProps> = ({
               {/* Restore Wallpaper Setting */}
               <div className="p-4">
                 <div className="flex items-center gap-3 mb-2 text-[#e9edef]"><ImageIcon size={18} className="text-[#8696a0]" /><span className="text-xs font-bold">Sanctuary Backdrop</span></div>
-                <div className="flex items-center gap-3">
-                  <input 
-                    type="text" 
-                    placeholder="Backdrop URL (e.g. Unsplash link)" 
-                    value={settings.wallpaper || ''} 
-                    onChange={(e) => onUpdateSettings({ wallpaper: e.target.value })}
-                    className="flex-1 bg-[#202c33] border border-white/5 rounded-xl px-4 py-2 text-[#d1d7db] text-xs outline-none focus:border-[#00a884]/30"
-                  />
-                  {settings.wallpaper && <button onClick={() => onUpdateSettings({ wallpaper: '' })} className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors"><Trash2 size={16} /></button>}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="text"
+                      placeholder="Backdrop URL (e.g. Unsplash link)"
+                      value={settings.wallpaper || ''}
+                      onChange={(e) => onUpdateSettings({ wallpaper: e.target.value })}
+                      className="flex-1 bg-[#202c33] border border-white/5 rounded-xl px-4 py-2 text-[#d1d7db] text-xs outline-none focus:border-[#00a884]/30"
+                    />
+                    <button onClick={() => wallpaperInputRef.current?.click()} className="p-2 text-[#00a884] hover:bg-[#00a884]/10 rounded-xl transition-colors"><Camera size={16} /></button>
+                    {settings.wallpaper && <button onClick={() => onUpdateSettings({ wallpaper: '' })} className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors"><Trash2 size={16} /></button>}
+                  </div>
+                  <input type="file" ref={wallpaperInputRef} onChange={handleWallpaperChange} accept="image/*" className="hidden" />
                 </div>
               </div>
 

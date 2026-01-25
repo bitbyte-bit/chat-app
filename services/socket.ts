@@ -5,10 +5,10 @@ import { io } from "socket.io-client";
 let socket: any = null;
 
 export const initSocket = (userId: string): any => {
-  // Use current host but point to the Node server port (usually 3003 in dev)
+  // Use current host but point to the Node server port (usually 3001 in dev)
   // Or fallback to origin if running behind a proxy
   const SOCKET_URL = window.location.hostname === 'localhost'
-    ? "http://localhost:3003"
+    ? "http://localhost:3001"
     : window.location.origin;
   
   // Cast options to any to fix property existence errors in the build environment
@@ -34,7 +34,23 @@ export const emitMessage = (messageData: any) => {
     if (messageData.type?.startsWith('webrtc-')) {
       socket.emit(messageData.type, messageData);
     } else {
-      socket.emit("send_message", messageData);
+      // Check if mediaUrl is large, send in chunks
+      const mediaUrl = messageData.mediaUrl;
+      if (mediaUrl && typeof mediaUrl === 'string' && mediaUrl.length > 1000000) { // ~750KB binary
+        const chunkSize = 500000; // 500KB chunks
+        const totalChunks = Math.ceil(mediaUrl.length / chunkSize);
+        for (let i = 0; i < totalChunks; i++) {
+          const chunk = mediaUrl.slice(i * chunkSize, (i + 1) * chunkSize);
+          socket.emit("send_message_chunk", {
+            ...messageData,
+            chunk,
+            chunkIndex: i,
+            totalChunks
+          });
+        }
+      } else {
+        socket.emit("send_message", messageData);
+      }
     }
   }
 };

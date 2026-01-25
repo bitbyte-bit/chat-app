@@ -10,9 +10,10 @@ interface MessageItemProps {
   onReact: (emoji: string) => void;
   onSwipeToReply?: (message: Message, decryptedContent: string) => void;
   onSwipeToDelete?: (messageId: string) => void;
+  isAdmin?: boolean;
 }
 
-const MessageItem: React.FC<MessageItemProps> = ({ message, onSwipeToReply, onSwipeToDelete }) => {
+const MessageItem: React.FC<MessageItemProps> = ({ message, userName, onSwipeToReply, onSwipeToDelete, isAdmin }) => {
   const isMe = message.role === 'user';
   const time = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   
@@ -174,6 +175,9 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, onSwipeToReply, onSw
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
+        <div className="text-[8px] text-[#8696a0] font-bold mb-1 px-1">
+          {isMe ? userName : 'Zenj'}
+        </div>
         <div className={`relative p-1 rounded-xl shadow-sm ${isMe ? 'bg-[#005c4b] text-[#e9edef] rounded-tr-none' : 'bg-[#202c33] text-[#e9edef] rounded-tl-none'}`}>
           
           {/* Media Rendering */}

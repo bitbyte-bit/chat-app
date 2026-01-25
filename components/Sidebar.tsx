@@ -129,20 +129,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-[#00a884] rounded-full border-2 border-[#111b21] shadow-sm" />
                   )}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center mb-0.5">
-                    <h3 className="text-[#e9edef] font-bold text-[13px] truncate leading-tight flex items-center gap-1.5">
-                      {contact.name}
-                      {contact.statusBadge && <span className="text-[10px] opacity-80">{contact.statusBadge}</span>}
-                    </h3>
-                    <span className="text-[8px] text-[#3b4a54] font-black uppercase tracking-tighter">
-                      {new Date(contact.lastMessageTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <p className="text-[10px] text-[#8696a0] truncate opacity-60 leading-none">{getDisplaySnippet(contact)}</p>
-                    {contact.unreadCount ? <div className="bg-[#00a884] text-black text-[8px] font-black px-1 rounded-full min-w-[12px] text-center ml-2">{contact.unreadCount}</div> : null}
-                  </div>
+                <div className="flex-1 min-w-0 flex justify-between items-center">
+                  <h3 className="text-[#e9edef] font-bold text-[13px] truncate leading-tight flex items-center gap-1.5">
+                    {contact.name}
+                    {contact.statusBadge && <span className="text-[10px] opacity-80">{contact.statusBadge}</span>}
+                  </h3>
+                  {contact.unreadCount ? <div className="bg-[#00a884] text-black text-[8px] font-black px-1 rounded-full min-w-[12px] text-center">{contact.unreadCount}</div> : null}
                 </div>
               </div>
             ))

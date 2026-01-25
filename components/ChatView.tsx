@@ -1,12 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  MoreVertical, Paperclip, Mic, Send, X, Phone, ArrowLeft, Trash2, 
-  Users, ShieldAlert, Settings, ShieldCheck, Reply, Video as VideoIcon, 
+import {
+  MoreVertical, Paperclip, Mic, Send, X, Phone, ArrowLeft, Trash2,
+  Users, ShieldAlert, Settings, ShieldCheck, Reply, Video as VideoIcon,
   Camera, File as FileIcon, Image as ImageIcon, Loader2, Play, Pause, FileText, Check
 } from 'lucide-react';
 import { Contact, Message, UserProfile } from '../types';
 import MessageItem from './MessageItem';
+import { useNotification } from './NotificationProvider';
 
 interface ChatViewProps {
   contact: Contact;
@@ -23,10 +24,34 @@ interface ChatViewProps {
   userProfile: UserProfile;
 }
 
+const compressImage = (dataUrl: string, quality: number = 0.8): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d')!;
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        } else {
+          resolve(dataUrl); // Fallback
+        }
+      }, 'image/jpeg', quality);
+    };
+    img.src = dataUrl;
+  });
+};
+
 const ChatView: React.FC<ChatViewProps> = ({
   contact, messages, onSendMessage, onMarkAsRead, onReactToMessage, onDeleteMessage,
   onStartCall, onBlockContact, onOpenGroupSettings, isTyping, onBack, userProfile
 }) => {
+  const { showNotification } = useNotification();
   const [input, setInput] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
@@ -70,8 +95,11 @@ const ChatView: React.FC<ChatViewProps> = ({
       }
 
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const url = reader.result as string;
+      reader.onloadend = async () => {
+        let url = reader.result as string;
+        if (file.type.startsWith('image/') && file.size > 2 * 1024 * 1024) { // Compress if > 2MB
+          url = await compressImage(url, 0.8); // Compress to 80% quality
+        }
         if (file.type.startsWith('image/')) {
           setSelectedImage(url);
           setSelectedVideo(null);
@@ -110,7 +138,7 @@ const ChatView: React.FC<ChatViewProps> = ({
       setRecordingTime(0);
       timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000);
     } catch (err) {
-      alert('Microphone access denied.');
+      showNotification('Microphone access denied.', [], 'error');
     }
   };
 
@@ -214,6 +242,7 @@ const ChatView: React.FC<ChatViewProps> = ({
               onReact={(emoji) => onReactToMessage(msg.id, emoji)}
               onSwipeToReply={(message, text) => setReplyTo({ id: message.id, text })}
               onSwipeToDelete={onDeleteMessage}
+              isAdmin={userProfile.role === 'admin'}
             />
           ))}
           {isTyping && (

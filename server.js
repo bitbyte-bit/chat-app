@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import { v4 as uuidv4 } from 'uuid';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +18,60 @@ app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 
 app.use(express.static(path.join(__dirname, 'dist')));
+
+// API endpoints
+app.post('/api/register', async (req, res) => {
+  const { name, email, phone, password } = req.body;
+  if (!name || !email || !phone || !password) {
+    return res.status(400).json({ error: 'All fields required' });
+  }
+  try {
+    const existing = await db.all('SELECT * FROM profile WHERE email = ? OR phone = ?', [email, phone]);
+    if (existing.length > 0) {
+      return res.status(400).json({ error: 'Account already exists' });
+    }
+    const userId = `u-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    await db.run(
+      "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [userId, name, phone, email, password, '', `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`, 'user', 'active', JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), 'member']
+    );
+    res.json({ success: true, userId });
+  } catch (err) {
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+app.post('/api/forgot-password', async (req, res) => {
+  const { email, phone } = req.body;
+  if (!email || !phone) {
+    return res.status(400).json({ error: 'Email and phone required' });
+  }
+  try {
+    const profiles = await db.all('SELECT * FROM profile WHERE email = ? AND phone = ?', [email, phone]);
+    if (profiles.length === 0) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    // Generate reset code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // In real app, send via email/SMS
+    res.json({ success: true, code }); // For demo, return code
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to process request' });
+  }
+});
+
+app.post('/api/reset-password', async (req, res) => {
+  const { email, phone, newPassword } = req.body;
+  if (!email || !phone || !newPassword) {
+    return res.status(400).json({ error: 'All fields required' });
+  }
+  try {
+    await db.run('UPDATE profile SET password = ? WHERE email = ? AND phone = ?', [newPassword, email, phone]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -29,6 +84,9 @@ const io = new Server(httpServer, {
 const DB_PATH = path.join(__dirname, 'zenj.db');
 
 let db;
+
+// Store for chunked messages
+const messageChunks = new Map();
 
 const initDb = async () => {
   db = await open({
@@ -78,6 +136,10 @@ const initDb = async () => {
       reply_to_text TEXT
     );
 
+    CREATE INDEX IF NOT EXISTS idx_messages_contact_id ON messages (contact_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages (timestamp);
+    CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages (role, contact_id);
+
     CREATE TABLE IF NOT EXISTS directory_users (
       id TEXT PRIMARY KEY,
       name TEXT,
@@ -117,9 +179,65 @@ const initDb = async () => {
       downloads INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS moments (
+      id TEXT PRIMARY KEY,
+      userId TEXT,
+      userName TEXT,
+      userAvatar TEXT,
+      content TEXT,
+      mediaUrl TEXT,
+      timestamp TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS system_metrics (
       id TEXT PRIMARY KEY,
       val INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS unique_installs (
+      ip TEXT PRIMARY KEY,
+      timestamp TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      message TEXT,
+      type TEXT,
+      timestamp TEXT,
+      active INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS performance_metrics (
+      id TEXT PRIMARY KEY,
+      metric_name TEXT,
+      value REAL,
+      timestamp TEXT,
+      user_id TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS moment_likes (
+      id TEXT PRIMARY KEY,
+      moment_id TEXT,
+      user_id TEXT,
+      timestamp TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS moment_comments (
+      id TEXT PRIMARY KEY,
+      moment_id TEXT,
+      user_id TEXT,
+      user_name TEXT,
+      user_avatar TEXT,
+      content TEXT,
+      timestamp TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS user_follows (
+      id TEXT PRIMARY KEY,
+      follower_id TEXT,
+      followed_id TEXT,
+      timestamp TEXT
     );
   `);
 
@@ -166,6 +284,21 @@ app.post('/api/profile', async (req, res) => {
       INSERT OR REPLACE INTO directory_users (id, name, bio, avatar, tags, accountStatus, statusBadge, email, phone, status, accountType)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, profileData.id, profileData.name, profileData.bio, profileData.avatar, tags, profileData.accountStatus, profileData.statusBadge || '', profileData.email, profileData.phone, status, profileData.accountType);
+
+    // Emit to all clients that a new user was added
+    io.emit('user_added', {
+      id: profileData.id,
+      name: profileData.name,
+      bio: profileData.bio,
+      avatar: profileData.avatar,
+      tags,
+      accountStatus: profileData.accountStatus,
+      statusBadge: profileData.statusBadge || '',
+      email: profileData.email,
+      phone: profileData.phone,
+      status,
+      accountType: profileData.accountType
+    });
 
     res.json({ success: true });
   } catch (e) {
@@ -291,6 +424,28 @@ app.delete('/api/tools/:id', async (req, res) => {
   }
 });
 
+app.get('/api/moments', async (req, res) => {
+  try {
+    const moments = await db.all('SELECT * FROM moments ORDER BY timestamp DESC');
+    res.json(moments);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/moments', async (req, res) => {
+  try {
+    const moment = req.body;
+    await db.run(`
+      INSERT INTO moments (id, userId, userName, userAvatar, content, mediaUrl, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, moment.id, moment.userId, moment.userName, moment.userAvatar, moment.content, moment.mediaUrl, moment.timestamp);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/directory', async (req, res) => {
   try {
     const users = await db.all('SELECT * FROM directory_users');
@@ -300,17 +455,206 @@ app.get('/api/directory', async (req, res) => {
   }
 });
 
+app.get('/api/notifications', async (req, res) => {
+  try {
+    const notifications = await db.all('SELECT * FROM notifications WHERE active = 1 ORDER BY timestamp DESC');
+    res.json(notifications);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/notifications', async (req, res) => {
+  try {
+    const { title, message, type } = req.body;
+    const id = `notif-${Date.now()}`;
+    await db.run('INSERT INTO notifications (id, title, message, type, timestamp, active) VALUES (?, ?, ?, ?, ?, ?)', [id, title, message, type || 'info', Date.now(), 1]);
+    const notification = { id, title, message, type: type || 'info', timestamp: Date.now(), active: 1 };
+    io.emit('new_notification', notification);
+    res.json({ success: true, notification });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/notifications/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, message, type, active } = req.body;
+    await db.run('UPDATE notifications SET title = ?, message = ?, type = ?, active = ? WHERE id = ?', [title, message, type, active ? 1 : 0, id]);
+    const updated = { id, title, message, type, active: active ? 1 : 0 };
+    io.emit('update_notification', updated);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/notifications/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.run('UPDATE notifications SET active = 0 WHERE id = ?', [id]);
+    io.emit('delete_notification', { id });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/metrics', async (req, res) => {
+  try {
+    const { metric_name, value, user_id } = req.body;
+    const id = uuidv4();
+    await db.run('INSERT INTO performance_metrics (id, metric_name, value, timestamp, user_id) VALUES (?, ?, ?, ?, ?)', [id, metric_name, value, Date.now(), user_id || 'anonymous']);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/metrics', async (req, res) => {
   try {
-    let metrics = await db.get('SELECT * FROM system_metrics WHERE id = ?', 'installs');
-    if (!metrics) {
-      await db.run('INSERT INTO system_metrics (id, val) VALUES (?, ?)', 'installs', 1);
-      metrics = { id: 'installs', val: 1 };
-    } else {
-      await db.run('UPDATE system_metrics SET val = val + 1 WHERE id = ?', 'installs');
-      metrics.val++;
+    const { metric_name, days = 7 } = req.query;
+    const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
+    let query = 'SELECT * FROM performance_metrics WHERE timestamp > ?';
+    let params = [cutoff];
+    if (metric_name) {
+      query += ' AND metric_name = ?';
+      params.push(metric_name);
     }
+    query += ' ORDER BY timestamp DESC';
+    const metrics = await db.all(query, params);
     res.json(metrics);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Moment interactions
+app.post('/api/moments/:id/like', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { user_id } = req.body;
+    const likeId = uuidv4();
+    await db.run('INSERT OR IGNORE INTO moment_likes (id, moment_id, user_id, timestamp) VALUES (?, ?, ?, ?)', [likeId, id, user_id, Date.now()]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/moments/:id/like', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { user_id } = req.query;
+    await db.run('DELETE FROM moment_likes WHERE moment_id = ? AND user_id = ?', [id, user_id]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/moments/:id/likes', async (req, res) => {
+  try {
+    const likes = await db.all('SELECT * FROM moment_likes WHERE moment_id = ?', [req.params.id]);
+    res.json(likes);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/moments/:id/comments', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { user_id, user_name, user_avatar, content } = req.body;
+    const commentId = uuidv4();
+    await db.run('INSERT INTO moment_comments (id, moment_id, user_id, user_name, user_avatar, content, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)', [commentId, id, user_id, user_name, user_avatar, content, Date.now()]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/moments/:id/comments', async (req, res) => {
+  try {
+    const comments = await db.all('SELECT * FROM moment_comments WHERE moment_id = ? ORDER BY timestamp DESC', [req.params.id]);
+    res.json(comments);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/users/:id/follow', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { follower_id } = req.body;
+    const followId = uuidv4();
+    await db.run('INSERT OR IGNORE INTO user_follows (id, follower_id, followed_id, timestamp) VALUES (?, ?, ?, ?)', [followId, follower_id, id, Date.now()]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/users/:id/follow', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { follower_id } = req.query;
+    await db.run('DELETE FROM user_follows WHERE follower_id = ? AND followed_id = ?', [follower_id, id]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/moments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { content, mediaUrl } = req.body;
+    await db.run('UPDATE moments SET content = ?, mediaUrl = ? WHERE id = ?', [content, mediaUrl, id]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/moments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.run('DELETE FROM moments WHERE id = ?', [id]);
+    await db.run('DELETE FROM moment_likes WHERE moment_id = ?', [id]);
+    await db.run('DELETE FROM moment_comments WHERE moment_id = ?', [id]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/metrics', async (req, res) => {
+  try {
+    const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
+
+    // Check if this IP has already been recorded
+    const existingInstall = await db.get('SELECT * FROM unique_installs WHERE ip = ?', clientIP);
+
+    if (!existingInstall) {
+      // New unique install, record it and increment counter
+      await db.run('INSERT INTO unique_installs (ip, timestamp) VALUES (?, ?)', clientIP, new Date().toISOString());
+
+      let metrics = await db.get('SELECT * FROM system_metrics WHERE id = ?', 'installs');
+      if (!metrics) {
+        await db.run('INSERT INTO system_metrics (id, val) VALUES (?, ?)', 'installs', 1);
+        metrics = { id: 'installs', val: 1 };
+      } else {
+        await db.run('UPDATE system_metrics SET val = val + 1 WHERE id = ?', 'installs');
+        metrics.val++;
+      }
+      res.json(metrics);
+    } else {
+      // Already recorded, just return current count
+      const metrics = await db.get('SELECT * FROM system_metrics WHERE id = ?', 'installs');
+      res.json(metrics || { id: 'installs', val: 0 });
+    }
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -337,7 +681,7 @@ io.on('connection', (socket) => {
   socket.on('send_message', async (data) => {
     const { recipientId, isGroup } = data;
     await db.run(`
-      INSERT INTO messages (id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status, reply_to_id, reply_to_text)
+      INSERT OR IGNORE INTO messages (id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status, reply_to_id, reply_to_text)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, data.id, data.contact_id, data.role, data.content, data.timestamp, data.type, data.mediaUrl, data.fileName, data.fileSize, data.status, data.reply_to_id, data.reply_to_text);
     if (isGroup) {
@@ -347,6 +691,35 @@ io.on('connection', (socket) => {
       if (recipientSocketId) {
         io.to(recipientSocketId).emit('receive_message', data);
       }
+    }
+  });
+
+  socket.on('send_message_chunk', async (data) => {
+    const { id, chunk, chunkIndex, totalChunks, recipientId, isGroup } = data;
+    if (!messageChunks.has(id)) {
+      messageChunks.set(id, { chunks: [], received: 0, data });
+    }
+    const msgData = messageChunks.get(id);
+    msgData.chunks[chunkIndex] = chunk;
+    msgData.received++;
+    if (msgData.received === totalChunks) {
+      // Assemble
+      const fullMediaUrl = msgData.chunks.join('');
+      const fullData = { ...msgData.data, mediaUrl: fullMediaUrl };
+      // Process as normal
+      await db.run(`
+        INSERT OR IGNORE INTO messages (id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status, reply_to_id, reply_to_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, fullData.id, fullData.contact_id, fullData.role, fullData.content, fullData.timestamp, fullData.type, fullData.mediaUrl, fullData.fileName, fullData.fileSize, fullData.status, fullData.reply_to_id, fullData.reply_to_text);
+      if (isGroup) {
+        socket.to(recipientId).emit('receive_message', fullData);
+      } else {
+        const recipientSocketId = users.get(recipientId);
+        if (recipientSocketId) {
+          io.to(recipientSocketId).emit('receive_message', fullData);
+        }
+      }
+      messageChunks.delete(id);
     }
   });
 
@@ -400,7 +773,7 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = 3003;
+const PORT = 3001;
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Zenj Relay active on port ${PORT}`);
 });

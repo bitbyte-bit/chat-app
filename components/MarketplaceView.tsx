@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Product, UserProfile, ZenjTool } from '../types';
 import { dbQuery, dbRun } from '../services/database';
+import { useNotification } from './NotificationProvider';
 
 interface MarketplaceViewProps {
   userProfile: UserProfile;
@@ -14,12 +15,14 @@ interface MarketplaceViewProps {
 }
 
 const MarketplaceView: React.FC<MarketplaceViewProps> = ({ userProfile, onCheckInStore }) => {
+  const { confirm } = useNotification();
   const [activeTab, setActiveTab] = useState<'marketplace' | 'software' | 'business' | 'dev-lab'>('marketplace');
   const [products, setProducts] = useState<Product[]>([]);
   const [tools, setTools] = useState<ZenjTool[]>([]);
   const [isPosting, setIsPosting] = useState<Product | boolean>(false);
   const [loading, setLoading] = useState(true);
   const [selectedTool, setSelectedTool] = useState<ZenjTool | null>(null);
+  const [toolDetailsModal, setToolDetailsModal] = useState<ZenjTool | null>(null);
 
   // Tool Creation State (Dev Lab)
   const [isManifestingTool, setIsManifestingTool] = useState(false);
@@ -84,7 +87,7 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({ userProfile, onCheckI
 
   // --- Fix: Added handleDelete function for manifestations ---
   const handleDelete = async (productId: string) => {
-    if (!confirm("Remove this manifestation from existence?")) return;
+    if (!(await confirm("Remove this manifestation from existence?"))) return;
     // Assuming server endpoint handles DELETE by productId through dbRun wrapper logic
     await dbRun("DELETE FROM products WHERE id = ?", [productId]);
     loadData();
@@ -250,7 +253,7 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({ userProfile, onCheckI
                        <div><h4 className="text-white font-bold text-lg font-outfit">{tool.name}</h4><span className="text-[10px] font-mono text-[#00a884] bg-[#00a884]/10 px-2 py-0.5 rounded">{tool.version}</span></div>
                     </div>
                     <p className="text-[#8696a0] text-sm mb-8 h-20 line-clamp-3">{tool.description}</p>
-                    <button onClick={() => setSelectedTool(tool)} className="w-full py-4 bg-[#00a884] text-black rounded-3xl font-black shadow-xl shadow-[#00a884]/20"><Download size={20} className="inline mr-2" /> Manifest Tool</button>
+                    <button onClick={() => setToolDetailsModal(tool)} className="w-full py-4 bg-[#00a884] text-black rounded-3xl font-black shadow-xl shadow-[#00a884]/20"><Info size={20} className="inline mr-2" /> View Details</button>
                  </div>
                ))}
             </div>
@@ -277,6 +280,36 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({ userProfile, onCheckI
                 <textarea placeholder="Manifest description..." value={newProduct.description} onChange={(e) => setNewProduct({...newProduct, description: e.target.value})} className="w-full h-24 bg-[#111b21] border border-white/5 rounded-2xl py-4 px-6 text-[#d1d7db] outline-none resize-none" />
               </div>
               <button onClick={handlePostItem} className="w-full bg-[#00a884] text-black py-5 rounded-3xl font-black text-lg shadow-2xl shadow-[#00a884]/20 transition-all">Synchronize Manifestation</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toolDetailsModal && (
+        <div className="fixed inset-0 z-[200] bg-black/95 flex flex-col p-6 animate-in slide-in-from-bottom duration-300">
+          <div className="flex justify-between items-center mb-6 max-w-lg mx-auto w-full">
+            <button onClick={() => setToolDetailsModal(null)} className="text-[#8696a0] hover:text-white p-2 bg-white/5 rounded-full"><X size={28} /></button>
+            <h3 className="text-white text-xl font-bold font-outfit">Tool Details</h3>
+            <div className="w-10"></div>
+          </div>
+          <div className="flex-1 flex flex-col items-center justify-center max-w-lg mx-auto w-full overflow-y-auto no-scrollbar pb-10">
+            <div className="w-full bg-[#202c33] rounded-[48px] p-8 shadow-2xl border border-white/10 space-y-6">
+              <div className="flex items-center gap-4">
+                <img src={toolDetailsModal.iconUrl} className="w-16 h-16 rounded-[24px] border border-white/10" alt="" />
+                <div>
+                  <h4 className="text-white font-bold text-xl font-outfit">{toolDetailsModal.name}</h4>
+                  <span className="text-[10px] font-mono text-[#00a884] bg-[#00a884]/10 px-2 py-0.5 rounded">{toolDetailsModal.version}</span>
+                </div>
+              </div>
+              <div>
+                <h5 className="text-[#8696a0] text-sm font-bold uppercase tracking-widest mb-2">Description</h5>
+                <p className="text-[#d1d7db] text-sm">{toolDetailsModal.description}</p>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-[#8696a0] text-sm">Downloads: {toolDetailsModal.downloads || 0}</span>
+                <span className="text-[#8696a0] text-sm">Size: {toolDetailsModal.fileSize || 'Unknown'}</span>
+              </div>
+              <button className="w-full bg-[#00a884] text-black py-4 rounded-3xl font-black shadow-xl shadow-[#00a884]/20"><Download size={20} className="inline mr-2" /> Download Tool</button>
             </div>
           </div>
         </div>

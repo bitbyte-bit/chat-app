@@ -24,7 +24,7 @@ import { generateResponse } from './services/gemini';
 import { initDatabase, dbQuery, dbRun } from './services/database';
 import { deriveKeyFromPassword, encryptContent, decryptContent } from './services/crypto';
 import { initSocket, emitMessage } from './services/socket';
-import { Sparkles, Loader2 } from 'lucide-react';
+import { Sparkles, Loader2, X } from 'lucide-react';
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
@@ -45,6 +45,9 @@ const App: React.FC = () => {
   const [moments, setMoments] = useState<Moment[]>([]);
   const [conversations, setConversations] = useState<Record<string, Message[]>>({});
   const [directoryUsers, setDirectoryUsers] = useState<any[]>([]);
+  const [viewedProfile, setViewedProfile] = useState<UserProfile | null>(null);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [dismissedNotifications, setDismissedNotifications] = useState<Set<string>>(new Set());
 
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
@@ -80,8 +83,20 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const start = async () => {
+      const logMetric = async (name: string, value: number) => {
+        fetch('/api/metrics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ metric_name: name, value, user_id: userProfile?.id })
+        }).catch(console.error);
+      };
+
       const bootTask = async () => {
         await initDatabase();
+        // Track install metrics
+        fetch('/api/metrics').catch(console.error);
+        // Log user activity
+        logMetric('user_activity', 1);
         await loadDataFromDb();
       };
       await bootTask();
@@ -129,7 +144,7 @@ const App: React.FC = () => {
         const encrypted = await encryptContent(`📢 System Signal: ${data.content}`);
         await dbRun(
           "INSERT INTO messages (id, contact_id, role, content, timestamp, type, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [`broadcast-${timestamp}`, 'zenj-main', 'assistant', encrypted, timestamp, 'text', 'delivered']
+          [`broadcast-${timestamp}-${Math.random().toString(36).substr(2, 9)}`, 'zenj-main', 'assistant', encrypted, timestamp, 'text', 'delivered']
         );
         if (userProfile.settings.notifications) {
           showPushNotification("Zenj System", data.content);
@@ -137,6 +152,10 @@ const App: React.FC = () => {
         await loadDataFromDb();
       });
       socket.on("user_status", loadDataFromDb);
+      socket.on("user_added", loadDataFromDb);
+      socket.on("new_notification", (notif) => setNotifications(prev => [notif, ...prev.filter(n => n.id !== notif.id)]));
+      socket.on("update_notification", (notif) => setNotifications(prev => prev.map(n => n.id === notif.id ? notif : n)));
+      socket.on("delete_notification", ({ id }) => setNotifications(prev => prev.filter(n => n.id !== id)));
     }
   }, [isAuthenticated, userProfile?.id, contacts]);
 
@@ -169,11 +188,13 @@ const App: React.FC = () => {
   }, [userProfile?.settings]);
 
   const loadDataFromDb = async () => {
-    const [profileRows, messageRows, contactRows, dirRows] = await Promise.all([
+    const [profileRows, messageRows, contactRows, dirRows, momentRows, notifRows] = await Promise.all([
       dbQuery("SELECT * FROM profile LIMIT 1"),
-      dbQuery("SELECT * FROM messages ORDER BY timestamp ASC"),
+      dbQuery("SELECT * FROM messages ORDER BY timestamp DESC LIMIT 2000"),
       dbQuery("SELECT * FROM contacts ORDER BY lastMessageTime DESC"),
-      dbQuery("SELECT * FROM directory_users")
+      dbQuery("SELECT * FROM directory_users"),
+      dbQuery("SELECT * FROM moments ORDER BY timestamp DESC LIMIT 100"),
+      fetch('/api/notifications').then(r => r.json()).catch(() => [])
     ]);
 
     if (profileRows.length > 0) {
@@ -196,7 +217,7 @@ const App: React.FC = () => {
     }
 
     const convos: Record<string, Message[]> = {};
-    messageRows.forEach((m: any) => {
+    messageRows.sort((a: any, b: any) => a.timestamp - b.timestamp).forEach((m: any) => {
       const cId = m.contact_id;
       if (!convos[cId]) convos[cId] = [];
       convos[cId].push({ ...m, reactions: m.reactions_json ? JSON.parse(m.reactions_json) : {} });
@@ -221,6 +242,8 @@ const App: React.FC = () => {
     }));
 
     setDirectoryUsers(dirRows);
+    setMoments(momentRows);
+    setNotifications(notifRows);
   };
 
   const handleRegister = async (data: any) => {
@@ -249,7 +272,7 @@ const App: React.FC = () => {
   };
 
   const handleDeleteMessage = async (messageId: string) => {
-    if (!confirm('Are you sure you want to delete this message?')) return;
+    if (!(await confirm('Are you sure you want to delete this message?'))) return;
 
     try {
       await dbRun("DELETE FROM messages WHERE id = ?", [messageId]);
@@ -277,12 +300,36 @@ const App: React.FC = () => {
     const activeContact = contacts.find(c => c.id === activeContactId);
     if (!activeContact) return;
 
+    // Check file size limit
+    if (file && file.size > 50 * 1024 * 1024) { // 50MB limit
+      showNotification("File too large. Maximum size is 50MB.", [], 'error');
+      return;
+    }
+
     const timestamp = Date.now();
     const type = file ? 'file' : (audioUrl ? 'audio' : (imageUrl ? 'image' : (videoUrl ? 'video' : 'text')));
     const mediaUrl = file?.url || audioUrl || imageUrl || videoUrl;
-    const msgId = timestamp.toString();
+    const msgId = `${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
 
-    // Immediate UI feedback
+    // Immediate UI feedback - add message to state optimistically
+    const optimisticMessage = {
+      id: msgId,
+      role: 'user' as const,
+      content: content || (type === 'file' ? `File: ${file?.name}` : type.toUpperCase()),
+      timestamp,
+      type,
+      mediaUrl,
+      fileName: file?.name,
+      fileSize: file?.size,
+      status: 'sending' as const,
+      reply_to_id: replyTo?.id,
+      reply_to_text: replyTo?.text
+    };
+    setConversations(prev => ({
+      ...prev,
+      [activeContactId]: [...(prev[activeContactId] || []), optimisticMessage]
+    }));
+
     if (userProfile.settings.vibrations && navigator.vibrate) {
       navigator.vibrate(20);
     }
@@ -311,6 +358,14 @@ const App: React.FC = () => {
           [msgId, activeContactId, 'user', encryptedContent, timestamp, type, finalMediaUrl, file?.name, file?.size, 'sent', replyTo?.id, replyTo?.text]
         );
 
+        // Update message status in state
+        setConversations(prev => ({
+          ...prev,
+          [activeContactId]: (prev[activeContactId] || []).map(msg =>
+            msg.id === msgId ? { ...msg, status: 'sent' as const, content: encryptedContent } : msg
+          )
+        }));
+
         // Send via socket for real-time delivery (only for non-main chats)
         if (!activeContactId.includes('main')) {
           emitMessage({
@@ -332,7 +387,7 @@ const App: React.FC = () => {
           try {
             let responseText = await generateResponse(content, conversations[activeContactId] || [], activeContact.systemInstruction, imageUrl);
             const encryptedResponse = await encryptContent(responseText);
-            const responseId = (Date.now() + 1).toString();
+            const responseId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
             await dbRun("INSERT INTO messages (id, contact_id, role, content, timestamp, type, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
               [responseId, activeContactId, 'assistant', encryptedResponse, Date.now(), 'text', 'delivered']);
             // Update conversations state directly instead of full reload
@@ -353,30 +408,40 @@ const App: React.FC = () => {
             setIsTyping(false);
           }
         }
-
-        // Update conversations state directly instead of full reload
+      } catch (error) {
+        console.error('Failed to send message:', error);
+        // Update message status to failed
         setConversations(prev => ({
           ...prev,
-          [activeContactId]: [...(prev[activeContactId] || []), {
-            id: msgId,
-            role: 'user',
-            content: encryptedContent,
-            timestamp,
-            type,
-            mediaUrl: finalMediaUrl,
-            fileName: file?.name,
-            fileSize: file?.size,
-            status: 'sent',
-            reply_to_id: replyTo?.id,
-            reply_to_text: replyTo?.text
-          }]
+          [activeContactId]: (prev[activeContactId] || []).map(msg =>
+            msg.id === msgId ? { ...msg, status: 'failed' as const } : msg
+          )
         }));
-
-      } catch (error) {
-        console.error('Message send error:', error);
-        showNotification("Failed to send message", [], 'error');
+        showNotification('Failed to send message', [], 'error');
       }
     })();
+  };
+
+  const handleAddMoment = async (content: string, mediaUrl?: string) => {
+    const momentId = `moment-${Date.now()}`;
+    await dbRun(
+      "INSERT INTO moments (id, userId, userName, userAvatar, content, mediaUrl, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [momentId, userProfile!.id, userProfile!.name, userProfile!.avatar, content, mediaUrl || null, Date.now()]
+    );
+    await loadDataFromDb();
+  };
+
+  const handleViewProfile = async (userId: string) => {
+    const profile = directoryUsers.find(u => u.id === userId);
+    if (profile) {
+      setViewedProfile({
+        ...profile,
+        role: 'user',
+        password: '', // Not shown
+        settings: DEFAULT_SETTINGS
+      });
+      setMode(AppMode.PROFILE);
+    }
   };
 
   const handleCheckInStore = async (sellerId: string, sellerName: string, sellerAvatar: string) => {
@@ -460,22 +525,18 @@ const App: React.FC = () => {
                   isTyping={isTyping}
                   userProfile={userProfile!}
                 />
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-center p-12">
-                   <div className="w-24 h-24 bg-[#00a884]/10 rounded-[40px] flex items-center justify-center mb-6"><Sparkles size={48} className="text-[#00a884]" /></div>
-                   <h1 className="text-3xl font-bold font-outfit mb-2 text-white">Zenj Portal</h1>
-                   <p className="text-[#8696a0] max-w-sm">Select a sanctuary to begin connection.</p>
-                </div>
-              )}
+              ) : null}
             </div>
           </div>
         );
       case AppMode.STATUS:
-        return <StatusView moments={moments} onAddMoment={() => {}} userProfile={userProfile!} />;
+        return <StatusView moments={moments} onAddMoment={handleAddMoment} onViewProfile={handleViewProfile} userProfile={userProfile!} />;
       case AppMode.DISCOVERY:
         return <DiscoveryView users={directoryUsers} onConnect={(u) => dbRun("INSERT INTO contacts (id, name, avatar, status, lastMessageSnippet, lastMessageTime) VALUES (?, ?, ?, ?, ?, ?)", [u.id, u.name, u.avatar, 'online', 'Connected.', Date.now()]).then(() => { loadDataFromDb(); setMode(AppMode.CHATS); setActiveContactId(u.id); })} connectedIds={contacts.map(c => c.id)} currentUser={userProfile!} onOpenAddFriend={() => setIsAddFriendModalOpen(true)} />;
       case AppMode.ZEN_SPACE:
         return <MarketplaceView userProfile={userProfile!} onCheckInStore={handleCheckInStore} />;
+      case AppMode.PROFILE:
+        return <ProfileView profile={viewedProfile || userProfile!} onUpdate={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, p.id]).then(() => { loadDataFromDb(); setViewedProfile(null); })} onBack={() => { setMode(AppMode.STATUS); setViewedProfile(null); }} isReadOnly={!!viewedProfile} />;
       case AppMode.SETTINGS:
         return <SettingsView profile={userProfile!} contacts={contacts} onBack={() => setMode(AppMode.CHATS)} onUpdateSettings={(s) => dbRun("UPDATE profile SET settings_json = ? WHERE id = ?", [JSON.stringify({...userProfile!.settings, ...s}), userProfile!.id]).then(loadDataFromDb)} onUpdateProfile={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, userProfile!.id]).then(loadDataFromDb)} onUpdatePassword={(p) => dbRun("UPDATE profile SET password=? WHERE id=?", [p, userProfile!.id]).then(loadDataFromDb)} onUnblockContact={() => {}} onClearData={() => { localStorage.clear(); window.location.reload(); }} onOpenAdmin={() => setMode(AppMode.ADMIN_DASHBOARD)} />;
       case AppMode.ADMIN_DASHBOARD:
@@ -504,11 +565,23 @@ const App: React.FC = () => {
           setIsAuthenticated(true);
           return true;
         } return false;
-      }} /> : (
+      }} onRegister={handleRegister} /> : (
         <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#0b141a]">
           {call.isActive && call.contact && <LiveCallOverlay contact={call.contact} type={call.type} onEnd={() => setCall({ isActive: false, type: null, contact: null })} currentUserId={userProfile?.id || ''} />}
           <AddFriendModal isOpen={isAddFriendModalOpen} onClose={() => setIsAddFriendModalOpen(false)} onAdd={(p) => dbRun("INSERT INTO contacts (id, name, avatar, status, lastMessageSnippet, lastMessageTime) VALUES (?, ?, ?, ?, ?, ?)", [`f-${Date.now()}`, p, `https://api.dicebear.com/7.x/avataaars/svg?seed=${p}`, 'offline', 'Hello!', Date.now()]).then(loadDataFromDb)} userName={userProfile.name} />
           <CreateGroupModal isOpen={isCreateGroupModalOpen} onClose={() => setIsCreateGroupModalOpen(false)} contacts={contacts} onCreate={(n, m) => dbRun("INSERT INTO contacts (id, name, avatar, status, isGroup, members_json, lastMessageSnippet, lastMessageTime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [`g-${Date.now()}`, n, `https://api.dicebear.com/7.x/initials/svg?seed=${n}`, 'active', 1, JSON.stringify(m), 'Group created.', Date.now()]).then(loadDataFromDb)} />
+          {notifications.filter(n => n.active && !dismissedNotifications.has(n.id)).slice(0, 1).map(notif => (
+            <div key={notif.id} className={`bg-${notif.type === 'error' ? 'rose' : notif.type === 'warning' ? 'amber' : notif.type === 'success' ? 'emerald' : 'blue'}-500/10 border-b border-${notif.type === 'error' ? 'rose' : notif.type === 'warning' ? 'amber' : notif.type === 'success' ? 'emerald' : 'blue'}-500/20 p-4 flex items-center justify-between`}>
+              <div className="flex items-center gap-3">
+                <div className={`w-2 h-2 rounded-full bg-${notif.type === 'error' ? 'rose' : notif.type === 'warning' ? 'amber' : notif.type === 'success' ? 'emerald' : 'blue'}-500`}></div>
+                <div>
+                  <h4 className="font-bold text-white">{notif.title}</h4>
+                  <p className="text-sm text-[#8696a0]">{notif.message}</p>
+                </div>
+              </div>
+              <button onClick={() => setDismissedNotifications(prev => new Set([...prev, notif.id]))} className="text-[#8696a0] hover:text-white p-1"><X size={16} /></button>
+            </div>
+          ))}
           <main className="flex-1 h-full overflow-hidden">
             {renderContent()}
           </main>
