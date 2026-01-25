@@ -1,10 +1,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  ArrowLeft, Palette, Bell, Smartphone, 
-  Trash2, Check, ChevronRight, Save, 
+import {
+  ArrowLeft, Palette, Bell, Smartphone,
+  Trash2, Check, ChevronRight, Save,
   Camera, User, Phone, Info, ShieldCheck, BarChart3,
-  Sun, Moon, Zap, UserCircle2, Building2, BellRing, Vibrate, Pipette, Download, Image as ImageIcon
+  Sun, Moon, Zap, UserCircle2, Building2, BellRing, Vibrate, Pipette, Download, Image as ImageIcon, Smile
 } from 'lucide-react';
 import { UserProfile, AppSettings, Contact } from '../types';
 
@@ -75,8 +75,18 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
     onUpdateProfile(editedProfile);
+    // Update status on server
+    try {
+      await fetch('/api/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: editedProfile.id, status: editedProfile.status })
+      });
+    } catch (e) {
+      console.error('Failed to update status', e);
+    }
     setProfileSaved(true);
     setTimeout(() => setProfileSaved(false), 2000);
   };
@@ -118,6 +128,10 @@ const SettingsView: React.FC<SettingsViewProps> = ({
                   <div className="space-y-1">
                     <label className="text-[#8696a0] text-[9px] font-bold uppercase tracking-widest flex items-center gap-2 ml-1"><Info size={12} /> Manifest Bio</label>
                     <textarea value={editedProfile.bio} onChange={(e) => setEditedProfile({...editedProfile, bio: e.target.value})} className="w-full h-16 bg-[#202c33] border border-white/5 rounded-xl px-4 py-2 text-[#d1d7db] text-sm outline-none resize-none focus:border-[#00a884]/30" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[#8696a0] text-[9px] font-bold uppercase tracking-widest flex items-center gap-2 ml-1"><Smile size={12} /> Status Message</label>
+                    <input type="text" value={editedProfile.status || ''} onChange={(e) => setEditedProfile({...editedProfile, status: e.target.value})} placeholder="Set your status..." className="w-full bg-[#202c33] border border-white/5 rounded-xl px-4 py-2 text-[#d1d7db] text-sm outline-none focus:border-[#00a884]/30" />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button onClick={() => setEditedProfile({...editedProfile, accountType: 'member'})} className={`flex items-center justify-center gap-2 p-3 rounded-xl border transition-all ${editedProfile.accountType === 'member' ? 'bg-[#00a884]/10 border-[#00a884] text-[#00a884]' : 'bg-[#2a3942] border-white/5 text-[#8696a0]'}`}>

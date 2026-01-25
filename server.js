@@ -35,6 +35,11 @@ app.post('/api/register', async (req, res) => {
       "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [userId, name, phone, email, password, '', `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`, 'user', 'active', JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), 'member']
     );
+    // Also add to directory for discovery
+    await db.run(
+      "INSERT INTO directory_users (id, name, bio, avatar, tags, accountStatus, statusBadge, email, phone, status, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [userId, name, '', `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`, '', 'active', '', email, phone, 'offline', 'member']
+    );
     res.json({ success: true, userId });
   } catch (err) {
     res.status(500).json({ error: 'Registration failed' });
@@ -73,6 +78,19 @@ app.post('/api/reset-password', async (req, res) => {
   }
 });
 
+app.post('/api/update-status', async (req, res) => {
+  const { userId, status } = req.body;
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID required' });
+  }
+  try {
+    await db.run('UPDATE directory_users SET statusBadge = ? WHERE id = ?', [status || '', userId]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
@@ -106,8 +124,10 @@ const initDb = async () => {
       avatar TEXT,
       role TEXT,
       accountStatus TEXT,
-      settings_json TEXT
+      settings_json TEXT,
+      status TEXT
     );
+    ALTER TABLE profile ADD COLUMN status TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS contacts (
       id TEXT PRIMARY KEY,
@@ -676,6 +696,16 @@ io.on('connection', (socket) => {
     await db.run('UPDATE directory_users SET status = ? WHERE id = ?', 'online', userId);
 
     io.emit('user_status', { userId, status: 'online' });
+  });
+
+  socket.on('disconnect', async () => {
+    const userId = sockets.get(socket.id);
+    if (userId) {
+      await db.run('UPDATE directory_users SET status = ? WHERE id = ?', 'offline', userId);
+      io.emit('user_status', { userId, status: 'offline' });
+      users.delete(userId);
+      sockets.delete(socket.id);
+    }
   });
 
   socket.on('send_message', async (data) => {
