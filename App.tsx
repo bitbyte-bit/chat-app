@@ -247,28 +247,46 @@ const App: React.FC = () => {
   };
 
   const handleRegister = async (data: any) => {
-    // Generate a unique user ID for network discovery
-    const userId = `u-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    const newProfile: UserProfile = {
-      id: userId,
-      name: data.name,
-      phone: data.phone,
-      email: data.email,
-      password: data.password,
-      bio: data.bio,
-      avatar: data.avatar,
-      role: 'user',
-      accountType: 'member',
-      accountStatus: 'active',
-      settings: DEFAULT_SETTINGS
-    };
-    await dbRun(
-      "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [newProfile.id, newProfile.name, newProfile.phone, newProfile.email, newProfile.password, newProfile.bio, newProfile.avatar, newProfile.role, newProfile.accountStatus, JSON.stringify(newProfile.settings), newProfile.accountType]
-    );
-    setUserProfile(newProfile);
-    await deriveKeyFromPassword(data.password, data.email);
-    setIsAuthenticated(true);
+    try {
+      const response = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: data.name,
+          email: data.email,
+          phone: data.phone,
+          password: data.password
+        })
+      });
+      const result = await response.json();
+      if (response.ok) {
+        const newProfile: UserProfile = {
+          id: result.userId,
+          name: data.name,
+          phone: data.phone,
+          email: data.email,
+          password: data.password,
+          bio: data.bio,
+          avatar: data.avatar,
+          role: 'user',
+          accountType: 'member',
+          accountStatus: 'active',
+          settings: DEFAULT_SETTINGS
+        };
+        // Save to local profile for the app to work
+        await dbRun(
+          "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [newProfile.id, newProfile.name, newProfile.phone, newProfile.email, newProfile.password, newProfile.bio, newProfile.avatar, newProfile.role, newProfile.accountStatus, JSON.stringify(newProfile.settings), newProfile.accountType]
+        );
+        setUserProfile(newProfile);
+        await deriveKeyFromPassword(data.password, data.email);
+        setIsAuthenticated(true);
+      } else {
+        showNotification(result.error, [], 'error');
+      }
+    } catch (err) {
+      showNotification('Registration failed', [], 'error');
+    }
   };
 
   const handleDeleteMessage = async (messageId: string) => {
@@ -540,7 +558,7 @@ const App: React.FC = () => {
       case AppMode.SETTINGS:
         return <SettingsView profile={userProfile!} contacts={contacts} onBack={() => setMode(AppMode.CHATS)} onUpdateSettings={(s) => dbRun("UPDATE profile SET settings_json = ? WHERE id = ?", [JSON.stringify({...userProfile!.settings, ...s}), userProfile!.id]).then(loadDataFromDb)} onUpdateProfile={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, userProfile!.id]).then(loadDataFromDb)} onUpdatePassword={(p) => dbRun("UPDATE profile SET password=? WHERE id=?", [p, userProfile!.id]).then(loadDataFromDb)} onUnblockContact={() => {}} onClearData={() => { localStorage.clear(); window.location.reload(); }} onOpenAdmin={() => setMode(AppMode.ADMIN_DASHBOARD)} />;
       case AppMode.ADMIN_DASHBOARD:
-        return <AdminDashboard onBack={() => setMode(AppMode.SETTINGS)} onBroadcast={(c) => socketRef.current?.emit("broadcast", { content: c })} tools={[]} loadTools={async () => (await dbQuery("SELECT * FROM tools")) as any[]} />;
+        return <AdminDashboard onBack={() => setMode(AppMode.SETTINGS)} onBroadcast={(c) => socketRef.current?.emit("broadcast", { content: c })} tools={[]} loadTools={async () => await fetch('/api/tools').then(r => r.json()).catch(() => [])} />;
       default:
         return null;
     }

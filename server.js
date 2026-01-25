@@ -40,6 +40,22 @@ app.post('/api/register', async (req, res) => {
       "INSERT INTO directory_users (id, name, bio, avatar, tags, accountStatus, statusBadge, email, phone, status, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [userId, name, '', `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`, '', 'active', '', email, phone, 'offline', 'member']
     );
+
+    // Emit to all clients that a new user was added
+    io.emit('user_added', {
+      id: userId,
+      name,
+      bio: '',
+      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
+      tags: '',
+      accountStatus: 'active',
+      statusBadge: '',
+      email,
+      phone,
+      status: 'offline',
+      accountType: 'member'
+    });
+
     res.json({ success: true, userId });
   } catch (err) {
     res.status(500).json({ error: 'Registration failed' });
@@ -350,7 +366,19 @@ app.post('/api/contacts', async (req, res) => {
 
 app.get('/api/messages', async (req, res) => {
   try {
-    const messages = await db.all('SELECT * FROM messages ORDER BY timestamp ASC');
+    const { contact_id, limit = 2000 } = req.query;
+    let query = 'SELECT * FROM messages';
+    let params = [];
+    if (contact_id) {
+      query += ' WHERE contact_id = ?';
+      params.push(contact_id);
+    }
+    query += ' ORDER BY timestamp DESC';
+    if (limit) {
+      query += ' LIMIT ?';
+      params.push(parseInt(limit));
+    }
+    const messages = await db.all(query, params);
     res.json(messages);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -515,6 +543,65 @@ app.delete('/api/notifications/:id', async (req, res) => {
     const { id } = req.params;
     await db.run('UPDATE notifications SET active = 0 WHERE id = ?', [id]);
     io.emit('delete_notification', { id });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/broadcast', async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) {
+      return res.status(400).json({ error: 'Content required' });
+    }
+    io.emit('broadcast', { content });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/users/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { accountStatus, statusBadge } = req.body;
+    await db.run('UPDATE directory_users SET accountStatus = ?, statusBadge = ? WHERE id = ?', accountStatus, statusBadge || '', id);
+    io.emit('user_status', { userId: id, status: accountStatus });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/tools', async (req, res) => {
+  try {
+    const { name, description, version, iconUrl, fileUrl, fileName } = req.body;
+    const id = `tool-${Date.now()}`;
+    await db.run('INSERT INTO tools (id, name, description, version, iconUrl, fileUrl, fileName, timestamp, downloads) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, name, description, version, iconUrl, fileUrl, fileName, Date.now(), 0]);
+    res.json({ success: true, id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/tools/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, version, iconUrl, fileUrl, fileName } = req.body;
+    await db.run('UPDATE tools SET name = ?, description = ?, version = ?, iconUrl = ?, fileUrl = ?, fileName = ? WHERE id = ?',
+      [name, description, version, iconUrl, fileUrl, fileName, id]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/tools/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.run('DELETE FROM tools WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

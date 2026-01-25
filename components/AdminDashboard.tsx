@@ -5,10 +5,10 @@ import {
   Search, UserMinus, Send,
   ShieldCheck, ArrowLeft, RefreshCw, Eye,
   Lock, X, Package, Plus, Trash2, Camera, FileUp, Cpu, Terminal,
-  Ban, ShieldQuestion, AlertTriangle, CheckCircle, Loader2, AlertCircle, HardDriveDownload, Edit3
+  Ban, ShieldQuestion, AlertTriangle, CheckCircle, Loader2, AlertCircle, Edit3
 } from 'lucide-react';
 import { Contact, AccountStatus, Message, ZenjTool } from '../types';
-import { dbQuery, dbRun, saveDatabase } from '../services/database';
+import { getSocket } from '../services/socket';
 import { useNotification } from './NotificationProvider';
 
 interface AdminDashboardProps {
@@ -40,18 +40,36 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
 
   const handleEditTool = async () => {
     if (!editingTool) return;
-    await dbRun("UPDATE tools SET name = ?, description = ?, version = ?, iconUrl = ?, fileUrl = ?, fileName = ? WHERE id = ?", [
-      editingTool.name, editingTool.description, editingTool.version, editingTool.iconUrl, editingTool.fileUrl, editingTool.fileName, editingTool.id
-    ]);
-    setEditingTool(null);
-    loadData();
+    try {
+      const response = await fetch(`/api/tools/${editingTool.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editingTool.name,
+          description: editingTool.description,
+          version: editingTool.version,
+          iconUrl: editingTool.iconUrl,
+          fileUrl: editingTool.fileUrl,
+          fileName: editingTool.fileName
+        })
+      });
+      if (response.ok) {
+        setEditingTool(null);
+        loadData();
+        showNotification('Tool updated successfully', [], 'success');
+      } else {
+        showNotification('Failed to update tool', [], 'error');
+      }
+    } catch (err) {
+      showNotification('Error updating tool', [], 'error');
+    }
   };
 
   const handleViewUser = async (userId: string) => {
     const user = users.find(u => u.id === userId);
     if (user) {
       setViewingUser(user);
-      const messages = await dbQuery("SELECT * FROM messages WHERE contact_id = ? ORDER BY timestamp DESC LIMIT 50", [userId]);
+      const messages = await fetch(`/api/messages?contact_id=${userId}&limit=50`).then(r => r.json()).catch(() => []);
       setUserMessages(messages as Message[]);
     }
   };
@@ -80,14 +98,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = async () => {
-    const [dirUsers, toolList, metrics, messageCount, messages, notifs] = await Promise.all([
-      dbQuery("SELECT * FROM directory_users"),
+    const [dirUsers, toolList, metrics, messageCount, messages, notifs, perfMetrics] = await Promise.all([
+      fetch('/api/directory').then(r => r.json()).catch(() => []),
       loadTools(),
-      dbQuery("SELECT val FROM system_metrics WHERE id = 'installs'"),
-      dbQuery("SELECT COUNT(*) as count FROM messages"),
-      dbQuery("SELECT * FROM messages ORDER BY timestamp DESC LIMIT 100"),
+      fetch('/api/metrics').then(r => r.json()).catch(() => ({ val: 0 })),
+      fetch('/api/messages').then(r => r.json()).then(msgs => ({ count: msgs.length })).catch(() => ({ count: 0 })),
+      fetch('/api/messages').then(r => r.json()).then(msgs => msgs.slice(0, 100)).catch(() => []),
       fetch('/api/notifications').then(r => r.json()).catch(() => []),
-      fetch('/api/metrics').then(r => r.json()).catch(() => [])
+      fetch('/api/metrics?metric_name=response_time').then(r => r.json()).catch(() => [])
     ]);
 
     setUsers((dirUsers as any[]).map(u => ({
@@ -97,7 +115,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
     })));
     setTools(toolList as ZenjTool[]);
     if (metrics && metrics.length > 0) setInstalls(metrics[0].val);
-    setMessageCount((messageCount as any[])[0]?.count || 0);
+    setMessageCount(messageCount.count || 0);
     setAllMessages(messages as Message[]);
     setNotifications(notifs);
     setPerformanceMetrics(metrics);
@@ -106,7 +124,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
   useEffect(() => {
     loadData();
     const interval = setInterval(loadData, 10000);
-    return () => clearInterval(interval);
+
+    // Socket listeners for real-time updates
+    const socket = getSocket();
+    if (socket) {
+      socket.on('user_added', loadData);
+      socket.on('user_status', loadData);
+      socket.on('new_notification', () => loadData()); // Reload notifications
+    }
+
+    return () => {
+      clearInterval(interval);
+      if (socket) {
+        socket.off('user_added', loadData);
+        socket.off('user_status', loadData);
+        socket.off('new_notification', loadData);
+      }
+    };
   }, []);
 
   const stats = useMemo(() => {
@@ -124,9 +158,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
   const handleUpdateStatus = async (userId: string, status: AccountStatus) => {
     if (!(await confirm(`Are you sure you want to set status to ${status}?`))) return;
     const badge = status === 'warned' ? '⚠️' : status === 'suspended' ? '🚫' : status === 'banned' ? '⛔' : '';
-    await dbRun("UPDATE directory_users SET accountStatus = ?, statusBadge = ? WHERE id = ?", [status, badge, userId]);
-    loadData();
-    onBroadcast(`User ${userId} has been ${status}.`);
+    try {
+      const response = await fetch(`/api/users/${userId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountStatus: status, statusBadge: badge })
+      });
+      if (response.ok) {
+        loadData();
+        // Broadcast the status change
+        await fetch('/api/broadcast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: `User ${userId} has been ${status}.` })
+        });
+      } else {
+        showNotification('Failed to update user status', [], 'error');
+      }
+    } catch (err) {
+      showNotification('Error updating user status', [], 'error');
+    }
   };
 
   const checkConflict = () => {
@@ -163,18 +214,38 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
 
   const finalizeUpload = async () => {
     setIsFinalizing(true);
-    const id = `tool-${Date.now()}`;
-    await dbRun("INSERT INTO tools (id, name, description, version, iconUrl, fileUrl, fileName, timestamp, downloads) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
-      id, newTool.name, newTool.description, newTool.version, 
-      newTool.icon, newTool.file, newTool.fileName, Date.now(), 0
-    ]);
-    setTimeout(() => {
-      setIsAddingTool(false);
+    try {
+      const response = await fetch('/api/tools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newTool.name,
+          description: newTool.description,
+          version: newTool.version,
+          iconUrl: newTool.icon,
+          fileUrl: newTool.file,
+          fileName: newTool.fileName
+        })
+      });
+      if (response.ok) {
+        setTimeout(() => {
+          setIsAddingTool(false);
+          setIsFinalizing(false);
+          setUploadProgress(0);
+          setNewTool({ name: '', description: '', version: '1.0.0', icon: '', file: '', fileName: '' });
+          loadData();
+          showNotification('Tool uploaded successfully', [], 'success');
+        }, 1000);
+      } else {
+        showNotification('Failed to upload tool', [], 'error');
+        setIsFinalizing(false);
+        setUploadProgress(0);
+      }
+    } catch (err) {
+      showNotification('Error uploading tool', [], 'error');
       setIsFinalizing(false);
       setUploadProgress(0);
-      setNewTool({ name: '', description: '', version: '1.0.0', icon: '', file: '', fileName: '' });
-      loadData();
-    }, 1000);
+    }
   };
 
   const handleIconSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -231,7 +302,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
             <button onClick={() => setActiveTab('broadcast')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'broadcast' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Broadcast</button>
             <button onClick={() => setActiveTab('tools')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'tools' ? 'bg-[#00a884] text-black shadow-lg' : 'text-[#8696a0]'}`}>Lab</button>
          </div>
-         <button onClick={() => saveDatabase()} className="p-3 bg-[#00a884] text-black rounded-2xl hover:bg-[#06cf9c] transition-all"><HardDriveDownload size={20} /></button>
       </header>
 
       <div className="flex-1 overflow-y-auto no-scrollbar p-6 space-y-6">
@@ -264,7 +334,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
                 <div className="text-3xl font-bold text-amber-500 font-outfit">{stats.toolCount}</div>
               </div>
               <div className="bg-[#111b21] p-4 rounded-[24px] border border-white/5 shadow-xl">
-                <HardDriveDownload className="text-rose-500 mb-2" size={24} />
+                <Cpu className="text-rose-500 mb-2" size={24} />
                 <div className="text-[#8696a0] text-[10px] font-bold uppercase mb-1">Installs</div>
                 <div className="text-3xl font-bold text-rose-500 font-outfit">{stats.installs}</div>
               </div>
@@ -502,57 +572,48 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
                 <div className="flex gap-4 pt-4">
                   <button
                     onClick={async () => {
-                      if (!newUser.name || !newUser.email || !newUser.password) {
-                        showNotification('Name, email, and password are required', [], 'error');
+                      if (!newUser.name || !newUser.email || !newUser.phone || !newUser.password) {
+                        showNotification('All fields are required', [], 'error');
                         return;
                       }
 
-                      const userId = `user-${Date.now()}`;
-                      const avatar = newUser.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(newUser.name)}`;
-
                       try {
-                        await dbRun(
-                          "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          [userId, newUser.name, newUser.phone, newUser.email, newUser.password, newUser.bio || '', avatar, 'user', 'active', JSON.stringify({
-                            theme: 'dark',
-                            wallpaper: '',
-                            vibrations: true,
-                            notifications: true,
-                            fontSize: 'medium',
-                            brightness: 'dim',
-                            customThemeColor: '#00a884'
-                          })]
-                        );
-
-                        // Sync to user discovery
-                        await dbRun(
-                          "INSERT INTO directory_users (id, name, email, avatar, bio, status, accountStatus, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                          [userId, newUser.name, newUser.email, avatar, newUser.bio || '', 'offline', 'active', '']
-                        );
-
-                        // Generate profile link
-                        const profileLink = `${window.location.origin}?profile=${userId}`;
-
-                        // Copy to clipboard
-                        navigator.clipboard.writeText(profileLink);
-
-                        showNotification(`User created successfully! Profile link copied to clipboard:\n${profileLink}`, [], 'success');
-
-                        setNewUser({
-                          name: '',
-                          email: '',
-                          phone: '',
-                          password: '',
-                          bio: '',
-                          avatar: '',
-                          avatarFile: null
+                        const response = await fetch('/api/register', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            name: newUser.name,
+                            email: newUser.email,
+                            phone: newUser.phone,
+                            password: newUser.password
+                          })
                         });
-                        if (avatarInputRef.current) avatarInputRef.current.value = '';
+                        const data = await response.json();
+                        if (response.ok) {
+                          // Generate profile link
+                          const profileLink = `${window.location.origin}?profile=${data.userId}`;
 
-                        loadData();
-                      } catch (error) {
-                        console.error('Error creating user:', error);
-                        showNotification('Error creating user. Please try again.', [], 'error');
+                          // Copy to clipboard
+                          navigator.clipboard.writeText(profileLink);
+
+                          showNotification(`User created successfully! Profile link copied to clipboard:\n${profileLink}`, [], 'success');
+
+                          setNewUser({
+                            name: '',
+                            email: '',
+                            phone: '',
+                            password: '',
+                            bio: '',
+                            avatar: '',
+                            avatarFile: null
+                          });
+                          if (avatarInputRef.current) avatarInputRef.current.value = '';
+                          loadData(); // Refresh the UI
+                        } else {
+                          showNotification(data.error, [], 'error');
+                        }
+                      } catch (err) {
+                        showNotification('Error creating user', [], 'error');
                       }
                     }}
                     className="flex-1 bg-[#00a884] text-black font-bold py-3 px-6 rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-xl shadow-[#00a884]/20"
@@ -778,14 +839,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
 
                 <div className="flex gap-4 pt-4">
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       if (!broadcastMessage.trim()) {
                         showNotification('Please enter a message to broadcast', [], 'error');
                         return;
                       }
-                      onBroadcast(broadcastMessage.trim());
-                      setBroadcastMessage('');
-                      showNotification('Message broadcasted successfully!', [], 'success');
+                      try {
+                        const response = await fetch('/api/broadcast', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ content: broadcastMessage.trim() })
+                        });
+                        if (response.ok) {
+                          setBroadcastMessage('');
+                          showNotification('Message broadcasted successfully!', [], 'success');
+                        } else {
+                          showNotification('Failed to send broadcast', [], 'error');
+                        }
+                      } catch (err) {
+                        showNotification('Error sending broadcast', [], 'error');
+                      }
                     }}
                     className="flex-1 bg-[#00a884] text-black font-bold py-3 px-6 rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-xl shadow-[#00a884]/20 flex items-center justify-center gap-2"
                   >
@@ -827,7 +900,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
                           <img src={tool.iconUrl} className="w-14 h-14 rounded-2xl border border-white/10 shadow-lg object-cover" alt="" />
                           <div className="flex gap-2">
                             <button onClick={() => setEditingTool(tool)} className="p-2 text-[#8696a0] hover:text-[#00a884] hover:bg-[#00a884]/10 rounded-xl transition-all"><Edit3 size={18} /></button>
-                            <button onClick={() => dbRun("DELETE FROM tools WHERE id = ?", [tool.id]).then(loadData)} className="p-2 text-[#8696a0] hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all"><Trash2 size={18} /></button>
+                            <button onClick={async () => {
+                              if (await confirm('Are you sure you want to delete this tool?')) {
+                                try {
+                                  const response = await fetch(`/api/tools/${tool.id}`, { method: 'DELETE' });
+                                  if (response.ok) {
+                                    loadData();
+                                    showNotification('Tool deleted successfully', [], 'success');
+                                  } else {
+                                    showNotification('Failed to delete tool', [], 'error');
+                                  }
+                                } catch (err) {
+                                  showNotification('Error deleting tool', [], 'error');
+                                }
+                              }
+                            }} className="p-2 text-[#8696a0] hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all"><Trash2 size={18} /></button>
                           </div>
                        </div>
                        <h4 className="text-white font-bold text-lg font-outfit">{tool.name}</h4>
