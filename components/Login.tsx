@@ -194,7 +194,13 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
         setNewAccount({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
         // Optionally, auto-login or redirect
       } else {
-        showNotification(data.error, [], 'error');
+        if (data.error === 'Account already exists') {
+          showNotification('Account already exists. Please log in with your existing credentials.', [], 'info');
+          setShowCreateAccount(false);
+          setNewAccount({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
+        } else {
+          showNotification(data.error, [], 'error');
+        }
       }
     } catch (err) {
       showNotification('Error creating account.', [], 'error');
