@@ -276,14 +276,7 @@ const initDb = async () => {
     );
   `);
 
-  // Insert default data if not exists
-  const oracleExists = await db.get('SELECT id FROM directory_users WHERE id = ?', 'zenj-main');
-  if (!oracleExists) {
-    await db.run(`
-      INSERT INTO directory_users (id, name, bio, avatar, tags, accountStatus, statusBadge, email, phone, status, accountType)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, 'zenj-main', 'Zenj Oracle', 'The primary consciousness of the Zenj network.', 'https://api.dicebear.com/7.x/bottts/svg?seed=ZenjOracle&backgroundColor=00a884', 'AI, Oracle, Guardian', 'active', '', 'oracle@zenj.ai', '+000000000', 'online', 'member');
-  }
+  // No default data insertion
 
   const installsExists = await db.get('SELECT id FROM system_metrics WHERE id = ?', 'installs');
   if (!installsExists) {

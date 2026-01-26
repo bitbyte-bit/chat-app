@@ -4,7 +4,7 @@ import {
   ArrowLeft, Palette, Bell, Smartphone,
   Trash2, Check, ChevronRight, Save,
   Camera, User, Phone, Info, ShieldCheck, BarChart3,
-  Sun, Moon, Zap, UserCircle2, Building2, BellRing, Vibrate, Pipette, Download, Image as ImageIcon, Smile
+  Sun, Moon, Zap, UserCircle2, Building2, BellRing, Vibrate, Pipette, Download, Image as ImageIcon, Smile, LogOut
 } from 'lucide-react';
 import { UserProfile, AppSettings, Contact } from '../types';
 
@@ -18,6 +18,7 @@ interface SettingsViewProps {
   onClearData: () => void;
   onBack: () => void;
   onOpenAdmin: () => void;
+  onLogout: () => void;
 }
 
 const THEMES = [
@@ -27,8 +28,8 @@ const THEMES = [
   { id: 'zen-ocean', label: 'Ocean', color: '#0c4a6e' },
 ];
 
-const SettingsView: React.FC<SettingsViewProps> = ({ 
-  profile, onUpdateSettings, onUpdateProfile, onClearData, onBack, onOpenAdmin
+const SettingsView: React.FC<SettingsViewProps> = ({
+  profile, onUpdateSettings, onUpdateProfile, onClearData, onBack, onOpenAdmin, onLogout
 }) => {
   const { settings } = profile;
   const isAdmin = profile.email === 'bitbyte790@gmail.com' || profile.role === 'admin';
@@ -236,7 +237,8 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           )}
 
-          <div className="pt-4 border-t border-white/5">
+          <div className="pt-4 border-t border-white/5 space-y-3">
+            <button onClick={onLogout} className="w-full py-3 bg-amber-500/5 text-amber-500 text-xs font-bold rounded-xl hover:bg-amber-500/10 transition-all flex items-center justify-center gap-2"><LogOut size={16} /> Logout</button>
             <button onClick={onClearData} className="w-full py-3 bg-rose-500/5 text-rose-500 text-xs font-bold rounded-xl hover:bg-rose-500/10 transition-all flex items-center justify-center gap-2"><Trash2 size={16} /> Purge Manifest</button>
           </div>
         </div>
