@@ -36,6 +36,20 @@ const DEFAULT_SETTINGS: AppSettings = {
   customThemeColor: '#00a884'
 };
 
+const DEFAULT_PROFILE: UserProfile = {
+  id: '',
+  name: 'Welcome to Zenj',
+  phone: '',
+  email: '',
+  password: '',
+  bio: '',
+  avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=welcome',
+  role: 'user',
+  accountType: 'member',
+  accountStatus: 'active',
+  settings: DEFAULT_SETTINGS
+};
+
 const App: React.FC = () => {
   const [dbReady, setDbReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -586,8 +600,8 @@ const App: React.FC = () => {
   return (
     <div className={`flex h-screen overflow-hidden font-sans text-[#f8fafc] theme-${s.theme} ${s.fontSize} brightness-${s.brightness}`}>
       <PWAInstallBanner />
-      {!userProfile ? <Onboarding onComplete={handleRegister} /> :
-      !isAuthenticated ? <Login profile={userProfile} onLogin={async (p) => {
+      {!userProfile || !isAuthenticated ? <Login profile={userProfile || DEFAULT_PROFILE} onLogin={async (p) => {
+        if (!userProfile) return false;
         if (p === userProfile.password) {
           await deriveKeyFromPassword(p, userProfile.email);
           setIsAuthenticated(true);

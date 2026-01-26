@@ -210,56 +210,58 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
   return (
     <div className="fixed inset-0 z-[250] bg-[#0b141a] flex flex-col items-center justify-center p-6">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#00a884]/10 blur-[120px] rounded-full"></div>
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#00a884] blur-[120px] rounded-full" style={{ opacity: 0.1 }}></div>
       </div>
 
       <div className="w-full max-w-sm relative z-10 text-center space-y-8 animate-in fade-in zoom-in duration-700">
         <div className="space-y-4">
-          <img 
-            src={profile.avatar} 
-            alt={profile.name} 
+          <img
+            src={profile.avatar}
+            alt={profile.name}
             className="w-24 h-24 rounded-[32px] mx-auto border-4 border-[#202c33] shadow-2xl"
           />
           <div className="space-y-1">
             <h2 className="text-2xl font-bold text-white font-outfit">
-              {isProfileLink ? `Welcome to Zenj, ${profile.name}!` : `Welcome back, ${profile.name}`}
+              {profile.id ? (isProfileLink ? `Welcome to Zenj, ${profile.name}!` : `Welcome back, ${profile.name}`) : 'Welcome to Zenj'}
             </h2>
-            <p className="text-[#8696a0] text-sm">Please enter your password to unlock your presence.</p>
+            <p className="text-[#8696a0] text-sm">{profile.id ? 'Please enter your password to unlock your presence.' : 'Please create an account to get started.'}</p>
           </div>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-6 text-left">
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-[#00a884] uppercase tracking-widest ml-2">Password</label>
-            <div className="relative">
-              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-[#3b4a54]" size={18} />
-              <input 
-                type={showPassword ? "text" : "password"}
-                autoFocus
-                placeholder="Enter password"
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setError(false); }}
-                className={`w-full bg-[#111b21] border ${error ? 'border-rose-500' : 'border-white/5'} rounded-2xl py-4 pl-12 pr-12 text-white outline-none focus:border-[#00a884]/40 transition-all text-lg`}
-              />
-              <button 
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-[#3b4a54] hover:text-[#00a884]"
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
+        {profile.id && (
+          <form onSubmit={handleLogin} className="space-y-6 text-left">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-[#00a884] uppercase tracking-widest ml-2">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-4 text-[#3b4a54]" style={{ top: '50%', transform: 'translateY(-50%)' }} size={18} />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoFocus
+                  placeholder="Enter password"
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError(false); }}
+                  className="w-full bg-[#111b21] border border-white rounded-2xl py-4 pl-12 pr-12 text-white outline-none focus:border-[#00a884] transition-all text-lg"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 text-[#3b4a54] hover:text-[#00a884]" style={{ top: '50%', transform: 'translateY(-50%)' }}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+              {error && <p className="text-rose-500 text-xs mt-2 ml-2 font-medium">Incorrect password. Please try again.</p>}
             </div>
-            {error && <p className="text-rose-500 text-xs mt-2 ml-2 font-medium">Incorrect password. Please try again.</p>}
-          </div>
 
-          <button 
-            type="submit"
-            disabled={!password || isLoading}
-            className="w-full bg-[#00a884] text-black font-bold py-5 rounded-[24px] flex items-center justify-center gap-2 shadow-2xl shadow-[#00a884]/20 hover:bg-[#06cf9c] transition-all disabled:opacity-50"
-          >
-            {isLoading ? <Loader2 className="animate-spin" size={20} /> : <>Unlock <ArrowRight size={20} /></>}
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={!password || isLoading}
+              className="w-full bg-[#00a884] text-black font-bold py-5 rounded-[24px] flex items-center justify-center gap-2 shadow-2xl shadow-[#00a884] hover:bg-[#06cf9c] transition-all disabled:opacity-50"
+            >
+              {isLoading ? <Loader2 className="animate-spin" size={20} /> : <>Unlock <ArrowRight size={20} /></>}
+            </button>
+          </form>
+        )}
 
         <div className="flex gap-4 justify-center">
           <button
@@ -268,188 +270,199 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
           >
             <UserPlus size={12} /> Create New Account
           </button>
-          <button
-            onClick={() => setShowForgotPassword(true)}
-            className="text-[#00a884] text-xs font-medium hover:text-white transition-colors flex items-center gap-1"
-          >
-            <Key size={12} /> Forgot Password
-          </button>
+          {profile.id && (
+            <button
+              onClick={() => setShowForgotPassword(true)}
+              className="text-[#00a884] text-xs font-medium hover:text-white transition-colors flex items-center gap-1"
+            >
+              <Key size={12} /> Forgot Password
+            </button>
+          )}
         </div>
+      </div>
 
-        {/* Forgot Password Modal */}
-        {showForgotPassword && (
-          <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-6">
-            <div className="bg-[#111b21] rounded-2xl p-6 w-full max-w-sm space-y-4">
-              <h3 className="text-white font-bold text-lg text-center">Forgot Password</h3>
-              {!generatedResetCode ? (
-                <>
-                  <p className="text-[#8696a0] text-sm text-center">Enter your email and phone to receive a reset code.</p>
-                  <input
-                    type="email"
-                    placeholder="Email"
-                    value={forgotEmail}
-                    onChange={(e) => setForgotEmail(e.target.value)}
-                    className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
-                  />
-                  <input
-                    type="tel"
-                    placeholder="Phone"
-                    value={forgotPhone}
-                    onChange={(e) => setForgotPhone(e.target.value)}
-                    className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
-                  />
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setShowForgotPassword(false)}
-                      className="flex-1 bg-[#202c33] text-white py-3 rounded-xl"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleForgotPassword}
-                      className="flex-1 bg-[#00a884] text-black font-bold py-3 rounded-xl"
-                    >
-                      Send Code
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="text-[#8696a0] text-sm text-center">Enter the reset code and your new password.</p>
-                  <input
-                    type="text"
-                    placeholder="Reset Code"
-                    value={resetCode}
-                    onChange={(e) => setResetCode(e.target.value)}
-                    className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
-                  />
-                  <input
-                    type="password"
-                    placeholder="New Password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
-                  />
-                  <input
-                    type="password"
-                    placeholder="Confirm New Password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
-                  />
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => {
-                        setShowForgotPassword(false);
-                        setGeneratedResetCode('');
-                        setResetCode('');
-                        setNewPassword('');
-                        setConfirmPassword('');
-                      }}
-                      className="flex-1 bg-[#202c33] text-white py-3 rounded-xl"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleResetPassword}
-                      className="flex-1 bg-[#00a884] text-black font-bold py-3 rounded-xl"
-                    >
-                      Reset Password
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Create Account Modal */}
-        {showCreateAccount && (
-          <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-6">
-            <div className="bg-[#111b21] rounded-2xl p-6 w-full max-w-sm space-y-4">
-              <h3 className="text-white font-bold text-lg text-center">Create New Account</h3>
-              <input
-                type="text"
-                placeholder="Name"
-                value={newAccount.name}
-                onChange={(e) => setNewAccount({...newAccount, name: e.target.value})}
-                className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
-              />
-              <input
-                type="email"
-                placeholder="Email"
-                value={newAccount.email}
-                onChange={(e) => setNewAccount({...newAccount, email: e.target.value})}
-                className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
-              />
-              <input
-                type="tel"
-                placeholder="Phone"
-                value={newAccount.phone}
-                onChange={(e) => setNewAccount({...newAccount, phone: e.target.value})}
-                className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
-              />
-              <div className="space-y-2">
+      {/* Forgot Password Modal */}
+      {showForgotPassword && (
+        <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-6">
+          <div className="bg-[#111b21] rounded-2xl p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-white font-bold text-lg text-center">Forgot Password</h3>
+            {!generatedResetCode ? (
+              <>
+                <p className="text-[#8696a0] text-sm text-center">Enter your email and phone to receive a reset code.</p>
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  className="w-full bg-[#202c33] border border-white rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884] transition-all"
+                />
+                <input
+                  type="tel"
+                  placeholder="Phone"
+                  value={forgotPhone}
+                  onChange={(e) => setForgotPhone(e.target.value)}
+                  className="w-full bg-[#202c33] border border-white rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884] transition-all"
+                />
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowForgotPassword(false)}
+                    className="flex-1 bg-[#202c33] text-white py-3 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleForgotPassword}
+                    className="flex-1 bg-[#00a884] text-black font-bold py-3 rounded-xl"
+                  >
+                    Send Code
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-[#8696a0] text-sm text-center">Enter the reset code and your new password.</p>
+                <input
+                  type="text"
+                  placeholder="Reset Code"
+                  value={resetCode}
+                  onChange={(e) => setResetCode(e.target.value)}
+                  className="w-full bg-[#202c33] border border-white rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884] transition-all"
+                />
                 <input
                   type="password"
-                  placeholder="Password"
-                  value={newAccount.password}
-                  onChange={(e) => setNewAccount({...newAccount, password: e.target.value})}
-                  className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+                  placeholder="New Password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full bg-[#202c33] border border-white rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884] transition-all"
                 />
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 bg-[#202c33] rounded-full h-2">
-                    <div
-                      className={`h-2 rounded-full transition-all ${
-                        passwordStrength === 0 ? 'bg-gray-500 w-0' :
-                        passwordStrength === 1 ? 'bg-red-500 w-1/5' :
-                        passwordStrength === 2 ? 'bg-orange-500 w-2/5' :
-                        passwordStrength === 3 ? 'bg-yellow-500 w-3/5' :
-                        passwordStrength === 4 ? 'bg-blue-500 w-4/5' :
-                        'bg-green-500 w-full'
-                      }`}
-                    ></div>
-                  </div>
-                  <span className="text-xs text-[#8696a0]">
-                    {passwordStrength === 0 ? 'Very Weak' :
-                     passwordStrength === 1 ? 'Weak' :
-                     passwordStrength === 2 ? 'Fair' :
-                     passwordStrength === 3 ? 'Good' :
-                     passwordStrength === 4 ? 'Strong' :
-                     'Very Strong'}
-                  </span>
+                <input
+                  type="password"
+                  placeholder="Confirm New Password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full bg-[#202c33] border border-white rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884] transition-all"
+                />
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowForgotPassword(false);
+                      setGeneratedResetCode('');
+                      setResetCode('');
+                      setNewPassword('');
+                      setConfirmPassword('');
+                    }}
+                    className="flex-1 bg-[#202c33] text-white py-3 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleResetPassword}
+                    className="flex-1 bg-[#00a884] text-black font-bold py-3 rounded-xl"
+                  >
+                    Reset Password
+                  </button>
                 </div>
-              </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Create Account Modal */}
+      {showCreateAccount && (
+        <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-6">
+          <div className="bg-[#111b21] rounded-2xl p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-white font-bold text-lg text-center">Create New Account</h3>
+            <input
+              type="text"
+              placeholder="Name"
+              value={newAccount.name}
+              onChange={(e) => setNewAccount({...newAccount, name: e.target.value})}
+              className="w-full bg-[#202c33] border border-white rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884] transition-all"
+            />
+            <input
+              type="email"
+              placeholder="Email"
+              value={newAccount.email}
+              onChange={(e) => setNewAccount({...newAccount, email: e.target.value})}
+              className="w-full bg-[#202c33] border border-white rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884] transition-all"
+            />
+            <input
+              type="tel"
+              placeholder="Phone"
+              value={newAccount.phone}
+              onChange={(e) => setNewAccount({...newAccount, phone: e.target.value})}
+              className="w-full bg-[#202c33] border border-white rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884] transition-all"
+            />
+            <div className="space-y-2">
               <input
                 type="password"
-                placeholder="Confirm Password"
-                value={newAccount.confirmPassword}
-                onChange={(e) => setNewAccount({...newAccount, confirmPassword: e.target.value})}
-                className="w-full bg-[#202c33] border border-white/5 rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884]/40"
+                placeholder="Password"
+                value={newAccount.password}
+                onChange={(e) => setNewAccount({...newAccount, password: e.target.value})}
+                className="w-full bg-[#202c33] border border-white rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884] transition-all"
               />
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setShowCreateAccount(false);
-                    setNewAccount({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
-                  }}
-                  className="flex-1 bg-[#202c33] text-white py-3 rounded-xl"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreateAccount}
-                  className="flex-1 bg-[#00a884] text-black font-bold py-3 rounded-xl"
-                >
-                  Create
-                </button>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-[#202c33] rounded-full h-2">
+                  <div
+                    className={`h-2 rounded-full transition-all ${
+                      passwordStrength === 0 ? 'bg-gray-500' :
+                      passwordStrength === 1 ? 'bg-red-500' :
+                      passwordStrength === 2 ? 'bg-orange-500' :
+                      passwordStrength === 3 ? 'bg-yellow-500' :
+                      passwordStrength === 4 ? 'bg-blue-500' :
+                      'bg-green-500'
+                    }`}
+                    style={{
+                      width: passwordStrength === 0 ? '0%' :
+                      passwordStrength === 1 ? '20%' :
+                      passwordStrength === 2 ? '40%' :
+                      passwordStrength === 3 ? '60%' :
+                      passwordStrength === 4 ? '80%' :
+                      '100%'
+                    }}
+                  ></div>
+                </div>
+                <span className="text-xs text-[#8696a0]">
+                  {passwordStrength === 0 ? 'Very Weak' :
+                   passwordStrength === 1 ? 'Weak' :
+                   passwordStrength === 2 ? 'Fair' :
+                   passwordStrength === 3 ? 'Good' :
+                   passwordStrength === 4 ? 'Strong' :
+                   'Very Strong'}
+                </span>
               </div>
             </div>
+            <input
+              type="password"
+              placeholder="Confirm Password"
+              value={newAccount.confirmPassword}
+              onChange={(e) => setNewAccount({...newAccount, confirmPassword: e.target.value})}
+              className="w-full bg-[#202c33] border border-white rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884] transition-all"
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowCreateAccount(false);
+                  setNewAccount({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
+                }}
+                className="flex-1 bg-[#202c33] text-white py-3 rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateAccount}
+                className="flex-1 bg-[#00a884] text-black font-bold py-3 rounded-xl"
+              >
+                Create
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
-  );
+  </div>
+);
 };
 
 export default Login;
