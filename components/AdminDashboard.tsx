@@ -123,7 +123,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 10000);
 
     // Socket listeners for real-time updates
     const socket = getSocket();
@@ -134,7 +133,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onBroadcast, lo
     }
 
     return () => {
-      clearInterval(interval);
       if (socket) {
         socket.off('user_added', loadData);
         socket.off('user_status', loadData);
