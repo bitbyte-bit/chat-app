@@ -112,6 +112,23 @@ const App: React.FC = () => {
         // Log user activity
         logMetric('user_activity', 1);
         await loadDataFromDb();
+
+        // Check connection twice
+        let connectionOk = false;
+        try {
+          const res = await fetch('http://localhost:3003/api/profile');
+          if (res.ok) connectionOk = true;
+        } catch {}
+        if (!connectionOk) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          try {
+            const res = await fetch('http://localhost:3003/api/profile');
+            if (res.ok) connectionOk = true;
+          } catch {}
+        }
+        if (!connectionOk) {
+          showNotification("Unable to connect to Zenj server. Working in offline mode.", [], 'error');
+        }
       };
       await bootTask();
       setDbReady(true);
@@ -126,10 +143,8 @@ const App: React.FC = () => {
 
     const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
-    const syncInterval = setInterval(loadDataFromDb, 2000);
     return () => {
       window.removeEventListener('resize', handleResize);
-      clearInterval(syncInterval);
     };
   }, []);
 

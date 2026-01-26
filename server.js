@@ -284,7 +284,16 @@ const initDb = async () => {
   }
 };
 
-initDb();
+const startServer = async () => {
+  await initDb();
+
+  const PORT = 3001;
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`Zenj Relay active on port ${PORT}`);
+  });
+};
+
+startServer();
 
 app.get('/api/profile', async (req, res) => {
   try {
@@ -729,6 +738,21 @@ app.delete('/api/moments/:id', async (req, res) => {
   }
 });
 
+app.post('/api/run', async (req, res) => {
+  try {
+    const { query, params } = req.body;
+    // Only allow INSERT, UPDATE, DELETE for security
+    const upperQuery = query.toUpperCase().trim();
+    if (!upperQuery.startsWith('INSERT') && !upperQuery.startsWith('UPDATE') && !upperQuery.startsWith('DELETE')) {
+      return res.status(400).json({ error: 'Only INSERT, UPDATE, DELETE allowed' });
+    }
+    await db.run(query, params);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/metrics', async (req, res) => {
   try {
     const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
@@ -836,18 +860,6 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('broadcast', data);
   });
 
-  socket.on('disconnect', async () => {
-    const userId = sockets.get(socket.id);
-    if (userId) {
-      users.delete(userId);
-      sockets.delete(socket.id);
-
-      await db.run('UPDATE directory_users SET status = ? WHERE id = ?', 'offline', userId);
-
-      io.emit('user_status', { userId, status: 'offline' });
-    }
-  });
-
   // WebRTC Signaling
   socket.on('webrtc-offer', (data) => {
     const { to, offer } = data;
@@ -880,9 +892,4 @@ io.on('connection', (socket) => {
       io.to(recipientSocketId).emit('webrtc-end', { from: sockets.get(socket.id) });
     }
   });
-});
-
-const PORT = 3001;
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`Zenj Relay active on port ${PORT}`);
 });

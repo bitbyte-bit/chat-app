@@ -208,18 +208,14 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[250] bg-[#0b141a] flex flex-col items-center justify-center p-6">
+      <div className="relative">
+        <div className="fixed inset-0 z-[250] bg-[#0b141a] flex flex-col items-center justify-center p-6">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#00a884] blur-[120px] rounded-full" style={{ opacity: 0.1 }}></div>
       </div>
 
       <div className="w-full max-w-sm relative z-10 text-center space-y-8 animate-in fade-in zoom-in duration-700">
         <div className="space-y-4">
-          <img
-            src={profile.avatar}
-            alt={profile.name}
-            className="w-24 h-24 rounded-[32px] mx-auto border-4 border-[#202c33] shadow-2xl"
-          />
           <div className="space-y-1">
             <h2 className="text-2xl font-bold text-white font-outfit">
               {profile.id ? (isProfileLink ? `Welcome to Zenj, ${profile.name}!` : `Welcome back, ${profile.name}`) : 'Welcome to Zenj'}
@@ -228,39 +224,50 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
           </div>
         </div>
 
-        {profile.id && (
-          <form onSubmit={handleLogin} className="space-y-6 text-left">
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-[#00a884] uppercase tracking-widest ml-2">Password</label>
+        {profile.id ? (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-3">
               <div className="relative">
-                <Lock className="absolute left-4 text-[#3b4a54]" style={{ top: '50%', transform: 'translateY(-50%)' }} size={18} />
                 <input
-                  type={showPassword ? "text" : "password"}
-                  autoFocus
-                  placeholder="Enter password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Enter your password"
                   value={password}
-                  onChange={(e) => { setPassword(e.target.value); setError(false); }}
-                  className="w-full bg-[#111b21] border border-white rounded-2xl py-4 pl-12 pr-12 text-white outline-none focus:border-[#00a884] transition-all text-lg"
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={`w-full bg-[#202c33] border rounded-xl py-3 px-4 text-white outline-none transition-all ${error ? 'border-red-500' : 'border-white focus:border-[#00a884]'}`}
+                  disabled={isLoading}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 text-[#3b4a54] hover:text-[#00a884]" style={{ top: '50%', transform: 'translateY(-50%)' }}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[#8696a0] hover:text-white"
                 >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                 </button>
               </div>
-              {error && <p className="text-rose-500 text-xs mt-2 ml-2 font-medium">Incorrect password. Please try again.</p>}
+              {error && <p className="text-red-500 text-sm">Incorrect password. Please try again.</p>}
             </div>
-
             <button
               type="submit"
-              disabled={!password || isLoading}
-              className="w-full bg-[#00a884] text-black font-bold py-5 rounded-[24px] flex items-center justify-center gap-2 shadow-2xl shadow-[#00a884] hover:bg-[#06cf9c] transition-all disabled:opacity-50"
+              disabled={isLoading || !password}
+              className="w-full bg-[#00a884] text-black font-bold py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              {isLoading ? <Loader2 className="animate-spin" size={20} /> : <>Unlock <ArrowRight size={20} /></>}
+              {isLoading ? <Loader2 size={20} className="animate-spin" /> : <Lock size={20} />}
+              {isLoading ? 'Unlocking...' : 'Unlock'}
             </button>
+            <div className="flex gap-4 justify-center">
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(true)}
+                className="text-[#00a884] text-xs font-medium hover:text-white transition-colors"
+              >
+                Forgot Password?
+              </button>
+            </div>
           </form>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-[#8696a0] text-sm">No account found. Please create a new account to get started.</p>
+          </div>
         )}
 
         <div className="flex gap-4 justify-center">
@@ -270,24 +277,15 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
           >
             <UserPlus size={12} /> Create New Account
           </button>
-          {profile.id && (
-            <button
-              onClick={() => setShowForgotPassword(true)}
-              className="text-[#00a884] text-xs font-medium hover:text-white transition-colors flex items-center gap-1"
-            >
-              <Key size={12} /> Forgot Password
-            </button>
-          )}
         </div>
       </div>
-
-      {/* Forgot Password Modal */}
-      {showForgotPassword && (
-        <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-6">
-          <div className="bg-[#111b21] rounded-2xl p-6 w-full max-w-sm space-y-4">
-            <h3 className="text-white font-bold text-lg text-center">Forgot Password</h3>
-            {!generatedResetCode ? (
-              <>
+    </div>
+            {showForgotPassword && (
+              <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-6">
+                <div className="bg-[#111b21] rounded-2xl p-6 w-full max-w-sm space-y-4">
+                  <h3 className="text-white font-bold text-lg text-center">Forgot Password</h3>
+                  {!generatedResetCode ? (
+                    <div>
                 <p className="text-[#8696a0] text-sm text-center">Enter your email and phone to receive a reset code.</p>
                 <input
                   type="email"
@@ -317,9 +315,9 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
                     Send Code
                   </button>
                 </div>
-              </>
+              </div>
             ) : (
-              <>
+              <div>
                 <p className="text-[#8696a0] text-sm text-center">Enter the reset code and your new password.</p>
                 <input
                   type="text"
@@ -362,7 +360,7 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
                     Reset Password
                   </button>
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -461,8 +459,7 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
         </div>
       )}
     </div>
-  </div>
-);
+  );
 };
 
 export default Login;

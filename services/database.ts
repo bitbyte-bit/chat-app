@@ -4,7 +4,7 @@
  * Centralized API bridge with LocalStorage fallback.
  */
 
-const API_BASE = 'http://localhost:3003';
+const API_BASE = 'http://localhost:3001';
 
 // Local Fallback Storage Key
 const FALLBACK_KEY = 'zenj_fallback_db';
@@ -24,14 +24,18 @@ const safeFetch = async (url: string, options?: RequestInit) => {
     const timeoutId = setTimeout(() => controller.abort(), 2000);
     const res = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(timeoutId);
-    
-    if (!res.ok) return null;
+
+    if (!res.ok) {
+      console.error(`API call failed: ${url} - ${res.status} ${res.statusText}`);
+      return null;
+    }
     const contentType = res.headers.get("content-type");
     if (contentType && contentType.includes("application/json")) {
       return await res.json();
     }
     return null;
   } catch (e) {
+    console.error(`API call error: ${url} - ${e}`);
     return null;
   }
 };
@@ -272,4 +276,60 @@ export const dbRun = async (query: string, params: any[] = []) => {
       body: JSON.stringify(message)
     });
   }
+
+  if (query.startsWith("UPDATE messages SET status")) {
+    const status = params[0];
+    const id = params[1];
+    const idx = local.messages.findIndex((m: any) => m.id === id);
+    if (idx >= 0) {
+      local.messages[idx].status = status;
+      saveLocalDb(local);
+    }
+  }
+
+  if (query.startsWith("DELETE FROM messages")) {
+    const id = params[0];
+    local.messages = local.messages.filter((m: any) => m.id !== id);
+    saveLocalDb(local);
+  }
+
+  if (query.startsWith("INSERT INTO moments")) {
+    const moment = {
+      id: params[0], userId: params[1], userName: params[2], userAvatar: params[3],
+      content: params[4], mediaUrl: params[5], timestamp: params[6]
+    };
+    if (!local.moments) local.moments = [];
+    local.moments.push(moment);
+    saveLocalDb(local);
+    await safeFetch(`${API_BASE}/api/moments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(moment)
+    });
+  }
+
+  if (query.startsWith("UPDATE moments SET")) {
+    const id = params[2];
+    const content = params[0];
+    const mediaUrl = params[1];
+    const idx = local.moments.findIndex((m: any) => m.id === id);
+    if (idx >= 0) {
+      local.moments[idx].content = content;
+      local.moments[idx].mediaUrl = mediaUrl;
+      saveLocalDb(local);
+    }
+  }
+
+  if (query.startsWith("DELETE FROM moments")) {
+    const id = params[0];
+    local.moments = local.moments.filter((m: any) => m.id !== id);
+    saveLocalDb(local);
+  }
+
+  // For any unhandled, use /api/run
+  await safeFetch(`${API_BASE}/api/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, params })
+  });
 };
