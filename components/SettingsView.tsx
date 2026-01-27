@@ -18,6 +18,7 @@ interface SettingsViewProps {
   onClearData: () => void;
   onBack: () => void;
   onOpenAdmin: () => void;
+  onSwitchAccount: () => void;
   onLogout: () => void;
 }
 
@@ -29,7 +30,7 @@ const THEMES = [
 ];
 
 const SettingsView: React.FC<SettingsViewProps> = ({
-  profile, onUpdateSettings, onUpdateProfile, onClearData, onBack, onOpenAdmin, onLogout
+  profile, onUpdateSettings, onUpdateProfile, onClearData, onBack, onOpenAdmin, onSwitchAccount, onLogout
 }) => {
   const { settings } = profile;
   const isAdmin = profile.email === 'bitbyte790@gmail.com' || profile.role === 'admin';
@@ -238,6 +239,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           )}
 
           <div className="pt-4 border-t border-white/5 space-y-3">
+            <button onClick={onSwitchAccount} className="w-full py-3 bg-[#00a884]/10 text-[#00a884] text-xs font-bold rounded-xl hover:bg-[#00a884]/20 transition-all flex items-center justify-center gap-2"><UserCircle2 size={16} /> Switch Account</button>
             <button onClick={onLogout} className="w-full py-3 bg-amber-500/5 text-amber-500 text-xs font-bold rounded-xl hover:bg-amber-500/10 transition-all flex items-center justify-center gap-2"><LogOut size={16} /> Logout</button>
             <button onClick={onClearData} className="w-full py-3 bg-rose-500/5 text-rose-500 text-xs font-bold rounded-xl hover:bg-rose-500/10 transition-all flex items-center justify-center gap-2"><Trash2 size={16} /> Purge Manifest</button>
           </div>

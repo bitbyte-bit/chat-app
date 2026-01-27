@@ -297,8 +297,8 @@ startServer();
 
 app.get('/api/profile', async (req, res) => {
   try {
-    const profile = await db.get('SELECT * FROM profile LIMIT 1');
-    res.json(profile);
+    const profiles = await db.all('SELECT * FROM profile');
+    res.json(profiles);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

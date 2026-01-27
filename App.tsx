@@ -17,6 +17,7 @@ import Onboarding from './components/Onboarding';
 import DiscoveryView from './components/DiscoveryView';
 import AdminDashboard from './components/AdminDashboard';
 import Login from './components/Login';
+import ProfileSelector from './components/ProfileSelector';
 import PWAInstallBanner from './components/PWAInstallBanner';
 import BottomNav from './components/BottomNav';
 import { NotificationProvider, useNotification } from './components/NotificationProvider';
@@ -55,6 +56,8 @@ const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [mode, setMode] = useState<AppMode>(AppMode.CHATS);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [availableProfiles, setAvailableProfiles] = useState<UserProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [moments, setMoments] = useState<Moment[]>([]);
   const [conversations, setConversations] = useState<Record<string, Message[]>>({});
@@ -70,6 +73,7 @@ const App: React.FC = () => {
   const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false);
   const [call, setCall] = useState<CallState>({ isActive: false, type: null, contact: null });
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [showProfileSelector, setShowProfileSelector] = useState(false);
 
   const socketRef = useRef<any>(null);
 
@@ -115,14 +119,15 @@ const App: React.FC = () => {
 
         // Check connection twice
         let connectionOk = false;
+        const serverUrl = window.location.hostname === 'localhost' ? 'http://localhost:3001' : window.location.origin;
         try {
-          const res = await fetch('http://localhost:3003/api/profile');
+          const res = await fetch(`${serverUrl}/api/profile`);
           if (res.ok) connectionOk = true;
         } catch {}
         if (!connectionOk) {
           await new Promise(resolve => setTimeout(resolve, 1000));
           try {
-            const res = await fetch('http://localhost:3003/api/profile');
+            const res = await fetch(`${serverUrl}/api/profile`);
             if (res.ok) connectionOk = true;
           } catch {}
         }
@@ -218,7 +223,7 @@ const App: React.FC = () => {
 
   const loadDataFromDb = async () => {
     const [profileRows, messageRows, contactRows, dirRows, momentRows, notifRows] = await Promise.all([
-      dbQuery("SELECT * FROM profile LIMIT 1"),
+      dbQuery("SELECT * FROM profile"),
       dbQuery("SELECT * FROM messages ORDER BY timestamp DESC LIMIT 2000"),
       dbQuery("SELECT * FROM contacts ORDER BY lastMessageTime DESC"),
       dbQuery("SELECT * FROM directory_users"),
@@ -226,23 +231,36 @@ const App: React.FC = () => {
       fetch('/api/notifications').then(r => r.json()).catch(() => [])
     ]);
 
-    if (profileRows.length > 0) {
-      const p = profileRows[0] as any;
+    // Load all available profiles
+    const profiles = profileRows.map((p: any) => {
       const remoteUser = (dirRows as any[]).find(u => u.id === p.id || u.id === 'me');
       const accountStatus = remoteUser?.accountStatus || p.accountStatus;
-
-      if (accountStatus === 'suspended' || accountStatus === 'banned') {
-         setIsAuthenticated(false);
-         showNotification(`Your account is currently ${accountStatus.toUpperCase()}. Contact the Zenj Council.`, [], 'error');
-         return;
-      }
-
-      setUserProfile({
+      return {
         ...p,
         accountStatus,
         accountType: p.accountType || 'member',
         settings: p.settings_json ? { ...DEFAULT_SETTINGS, ...JSON.parse(p.settings_json) } : DEFAULT_SETTINGS
-      });
+      };
+    });
+    setAvailableProfiles(profiles);
+
+    // Set current profile based on selectedProfileId or first available
+    let currentProfile = null;
+    if (selectedProfileId) {
+      currentProfile = profiles.find(p => p.id === selectedProfileId);
+    }
+    if (!currentProfile && profiles.length > 0) {
+      currentProfile = profiles[0];
+      setSelectedProfileId(profiles[0].id);
+    }
+
+    if (currentProfile) {
+      if (currentProfile.accountStatus === 'suspended' || currentProfile.accountStatus === 'banned') {
+        setIsAuthenticated(false);
+        showNotification(`Your account is currently ${currentProfile.accountStatus.toUpperCase()}. Contact the Zenj Council.`, [], 'error');
+        return;
+      }
+      setUserProfile(currentProfile);
     }
 
     const convos: Record<string, Message[]> = {};
@@ -595,7 +613,7 @@ const App: React.FC = () => {
       case AppMode.PROFILE:
         return <ProfileView profile={viewedProfile || userProfile!} onUpdate={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, p.id]).then(() => { loadDataFromDb(); setViewedProfile(null); })} onBack={() => { setMode(AppMode.STATUS); setViewedProfile(null); }} isReadOnly={!!viewedProfile} />;
       case AppMode.SETTINGS:
-        return <SettingsView profile={userProfile!} contacts={contacts} onBack={() => setMode(AppMode.CHATS)} onUpdateSettings={(s) => dbRun("UPDATE profile SET settings_json = ? WHERE id = ?", [JSON.stringify({...userProfile!.settings, ...s}), userProfile!.id]).then(loadDataFromDb)} onUpdateProfile={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, userProfile!.id]).then(loadDataFromDb)} onUpdatePassword={(p) => dbRun("UPDATE profile SET password=? WHERE id=?", [p, userProfile!.id]).then(loadDataFromDb)} onUnblockContact={() => {}} onClearData={() => { localStorage.clear(); window.location.reload(); }} onOpenAdmin={() => setMode(AppMode.ADMIN_DASHBOARD)} onLogout={handleLogout} />;
+        return <SettingsView profile={userProfile!} contacts={contacts} onBack={() => setMode(AppMode.CHATS)} onUpdateSettings={(s) => dbRun("UPDATE profile SET settings_json = ? WHERE id = ?", [JSON.stringify({...userProfile!.settings, ...s}), userProfile!.id]).then(loadDataFromDb)} onUpdateProfile={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, userProfile!.id]).then(loadDataFromDb)} onUpdatePassword={(p) => dbRun("UPDATE profile SET password=? WHERE id=?", [p, userProfile!.id]).then(loadDataFromDb)} onUnblockContact={() => {}} onClearData={() => { window.location.reload(); }} onOpenAdmin={() => setMode(AppMode.ADMIN_DASHBOARD)} onSwitchAccount={() => { setIsAuthenticated(false); setSelectedProfileId(null); setShowProfileSelector(true); }} onLogout={handleLogout} />;
       case AppMode.ADMIN_DASHBOARD:
         return <AdminDashboard onBack={() => setMode(AppMode.SETTINGS)} onBroadcast={(c) => socketRef.current?.emit("broadcast", { content: c })} tools={[]} loadTools={async () => await fetch('/api/tools').then(r => r.json()).catch(() => [])} />;
       default:
@@ -612,17 +630,56 @@ const App: React.FC = () => {
 
   const s = userProfile?.settings || DEFAULT_SETTINGS;
 
+  // Determine what to show for authentication
+  const renderAuth = () => {
+    if (showProfileSelector || (availableProfiles.length > 1 && !isAuthenticated)) {
+      return (
+        <ProfileSelector
+          profiles={availableProfiles}
+          currentProfile={userProfile}
+          onSelectProfile={(profile) => {
+            setSelectedProfileId(profile.id);
+            setUserProfile(profile);
+            setShowProfileSelector(false);
+          }}
+          onCreateNew={() => {
+            setUserProfile(null);
+            setSelectedProfileId(null);
+            setShowProfileSelector(false);
+          }}
+          onLogout={() => {
+            setIsAuthenticated(false);
+            setShowProfileSelector(true);
+          }}
+        />
+      );
+    }
+
+    if (!userProfile || !isAuthenticated) {
+      return (
+        <Login
+          profile={userProfile || DEFAULT_PROFILE}
+          onLogin={async (p) => {
+            if (!userProfile) return false;
+            if (p === userProfile.password) {
+              await deriveKeyFromPassword(p, userProfile.email);
+              setIsAuthenticated(true);
+              return true;
+            }
+            return false;
+          }}
+          onRegister={handleRegister}
+        />
+      );
+    }
+
+    return null;
+  };
+
   return (
     <div className={`flex h-screen overflow-hidden font-sans text-[#f8fafc] theme-${s.theme} ${s.fontSize} brightness-${s.brightness}`}>
       <PWAInstallBanner />
-      {!userProfile || !isAuthenticated ? <Login profile={userProfile || DEFAULT_PROFILE} onLogin={async (p) => {
-        if (!userProfile) return false;
-        if (p === userProfile.password) {
-          await deriveKeyFromPassword(p, userProfile.email);
-          setIsAuthenticated(true);
-          return true;
-        } return false;
-      }} onRegister={handleRegister} /> : (
+      {renderAuth() || (
         <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#0b141a]">
           {call.isActive && call.contact && <LiveCallOverlay contact={call.contact} type={call.type} onEnd={() => setCall({ isActive: false, type: null, contact: null })} currentUserId={userProfile?.id || ''} />}
           <AddFriendModal isOpen={isAddFriendModalOpen} onClose={() => setIsAddFriendModalOpen(false)} onAdd={(p) => dbRun("INSERT INTO contacts (id, name, avatar, status, lastMessageSnippet, lastMessageTime) VALUES (?, ?, ?, ?, ?, ?)", [`f-${Date.now()}`, p, `https://api.dicebear.com/7.x/avataaars/svg?seed=${p}`, 'offline', 'Hello!', Date.now()]).then(loadDataFromDb)} userName={userProfile.name} />
