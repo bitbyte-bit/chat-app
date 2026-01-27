@@ -370,25 +370,27 @@ const App: React.FC = () => {
       });
       const result = await response.json();
       if (response.ok) {
-        const newProfile: UserProfile = {
-          id: result.userId,
-          name: data.name,
-          phone: data.phone,
-          email: data.email,
-          password: data.password,
-          bio: data.bio,
-          avatar: data.avatar,
-          role: 'user',
-          accountType: 'member',
-          accountStatus: 'active',
-          settings: DEFAULT_SETTINGS
+        // Use the profile data returned from server
+        const profileData = result.profile;
+        const userProfile: UserProfile = {
+          id: profileData.id,
+          name: profileData.name,
+          phone: profileData.phone,
+          email: profileData.email,
+          password: profileData.password, // Note: this is hashed on server
+          bio: profileData.bio,
+          avatar: profileData.avatar,
+          role: profileData.role,
+          accountType: profileData.accountType,
+          accountStatus: profileData.accountStatus,
+          settings: JSON.parse(profileData.settings_json || JSON.stringify(DEFAULT_SETTINGS))
         };
-        // Save to local profile for the app to work
+        // Save to local profile for the app to work (use INSERT OR REPLACE in case it exists)
         await dbRun(
-          "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [newProfile.id, newProfile.name, newProfile.phone, newProfile.email, newProfile.password, newProfile.bio, newProfile.avatar, newProfile.role, newProfile.accountStatus, JSON.stringify(newProfile.settings), newProfile.accountType]
+          "INSERT OR REPLACE INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [userProfile.id, userProfile.name, userProfile.phone, userProfile.email, userProfile.password, userProfile.bio, userProfile.avatar, userProfile.role, userProfile.accountStatus, JSON.stringify(userProfile.settings), userProfile.accountType]
         );
-        setUserProfile(newProfile);
+        setUserProfile(userProfile);
         await deriveKeyFromPassword(data.password, data.email);
         setIsAuthenticated(true);
       } else {

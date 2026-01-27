@@ -72,41 +72,55 @@ app.post('/api/register', async (req, res) => {
   try {
     const existing = await db.all('SELECT * FROM profile WHERE email = ? OR phone = ?', [email, phone]);
     console.log('Existing accounts found:', existing.length);
+
+    let userId;
     if (existing.length > 0) {
-      console.log('Registration failed: Account exists');
-      return res.status(400).json({ error: 'Account already exists' });
+      // Account exists, verify password and log them in
+      const account = existing[0];
+      const passwordMatch = await verifyPassword(password, account.password);
+      if (!passwordMatch) {
+        console.log('Registration failed: Invalid password for existing account');
+        return res.status(400).json({ error: 'Account exists with different password. Please use login instead.' });
+      }
+      userId = account.id;
+      console.log('Existing account found, logging in user:', userId);
+    } else {
+      // Create new account
+      const hashedPassword = await hashPassword(password);
+      userId = `u-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const ip = req.ip || req.connection.remoteAddress;
+
+      const avatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`;
+      const settings = JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' });
+      await db.run(
+        "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [userId, name, phone, email, hashedPassword, '', avatar, 'user', 'active', settings, 'member', ip]
+      );
+      // Also add to directory for discovery
+      await db.run(
+        "INSERT INTO directory_users (id, name, bio, avatar, tags, accountStatus, statusBadge, email, phone, status, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [userId, name, '', avatar, '', 'active', '', email, phone, 'offline', 'member']
+      );
+
+      // Emit to all clients that a new user was added
+      io.emit('user_added', {
+        id: userId,
+        name,
+        bio: '',
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
+        tags: '',
+        accountStatus: 'active',
+        statusBadge: '',
+        email,
+        phone,
+        status: 'offline',
+        accountType: 'member'
+      });
     }
 
-    const hashedPassword = await hashPassword(password);
-    const userId = `u-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    const ip = req.ip || req.connection.remoteAddress;
-
-    await db.run(
-      "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [userId, name, phone, email, hashedPassword, '', `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`, 'user', 'active', JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), 'member', ip]
-    );
-    // Also add to directory for discovery
-    await db.run(
-      "INSERT INTO directory_users (id, name, bio, avatar, tags, accountStatus, statusBadge, email, phone, status, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [userId, name, '', `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`, '', 'active', '', email, phone, 'offline', 'member']
-    );
-
-    // Emit to all clients that a new user was added
-    io.emit('user_added', {
-      id: userId,
-      name,
-      bio: '',
-      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
-      tags: '',
-      accountStatus: 'active',
-      statusBadge: '',
-      email,
-      phone,
-      status: 'offline',
-      accountType: 'member'
-    });
-
-    res.json({ success: true, userId });
+    // Return the profile data
+    const profile = await db.get('SELECT * FROM profile WHERE id = ?', userId);
+    res.json({ success: true, userId, profile });
   } catch (err) {
     res.status(500).json({ error: 'Registration failed' });
   }
@@ -480,9 +494,9 @@ app.post('/api/profile', async (req, res) => {
   try {
     const profileData = req.body;
     await db.run(`
-      INSERT OR REPLACE INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, profileData.id, profileData.name, profileData.phone, profileData.email, profileData.password, profileData.bio, profileData.avatar, profileData.role, profileData.accountStatus, profileData.settings_json);
+      INSERT OR REPLACE INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, profileData.id, profileData.name, profileData.phone, profileData.email, profileData.password, profileData.bio, profileData.avatar, profileData.role, profileData.accountStatus, profileData.settings_json, profileData.accountType);
 
     // Upsert into directory_users
     const existing = await db.get('SELECT * FROM directory_users WHERE id = ? OR phone = ?', profileData.id, profileData.phone);
