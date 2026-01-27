@@ -55,6 +55,19 @@ const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [mode, setMode] = useState<AppMode>(AppMode.CHATS);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+
+  // Debug logs for authentication and mode
+  useEffect(() => {
+    console.log('DEBUG: isAuthenticated changed to:', isAuthenticated);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    console.log('DEBUG: mode changed to:', mode);
+  }, [mode]);
+
+  useEffect(() => {
+    console.log('DEBUG: userProfile changed:', userProfile ? userProfile.name : 'null');
+  }, [userProfile]);
   const [availableProfiles, setAvailableProfiles] = useState<UserProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -164,6 +177,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (isAuthenticated && userProfile) {
+      // Disconnect any existing socket
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
       const socket = initSocket(userProfile.id) as any;
       socketRef.current = socket;
 
@@ -263,8 +280,23 @@ const App: React.FC = () => {
       socket.on("new_notification", (notif) => setNotifications(prev => [notif, ...prev.filter(n => n.id !== notif.id)]));
       socket.on("update_notification", (notif) => setNotifications(prev => prev.map(n => n.id === notif.id ? notif : n)));
       socket.on("delete_notification", ({ id }) => setNotifications(prev => prev.filter(n => n.id !== id)));
+    } else {
+      // Disconnect socket if not authenticated or no userProfile
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
     }
   }, [isAuthenticated, userProfile?.id, contacts]);
+
+  // Cleanup socket on unmount
+  useEffect(() => {
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const unread = contacts.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
@@ -611,6 +643,7 @@ const App: React.FC = () => {
   const totalUnread = contacts.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
 
   const renderContent = () => {
+    console.log('DEBUG: renderContent called with mode:', mode);
     switch (mode) {
       case AppMode.CHATS:
         const activeContact = contacts.find(c => c.id === activeContactId);
@@ -708,6 +741,8 @@ const App: React.FC = () => {
   // Determine what to show for authentication
   const renderAuth = () => {
 
+    console.log('DEBUG: renderAuth called, isAuthenticated:', isAuthenticated, 'userProfile exists:', !!userProfile);
+
     if (!userProfile || !isAuthenticated) {
       return (
         <Login
@@ -740,6 +775,8 @@ const App: React.FC = () => {
 
     return null;
   };
+
+  console.log('DEBUG: About to render main component, isAuthenticated:', isAuthenticated, 'mode:', mode);
 
   return (
     <div className={`flex h-screen overflow-hidden font-sans text-[#f8fafc] theme-${s.theme} ${s.fontSize} brightness-${s.brightness}`}>
