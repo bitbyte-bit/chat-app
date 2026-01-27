@@ -53,6 +53,12 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
     }
   }, [profile]);
 
+  useEffect(() => {
+    if (!profile.id) {
+      setShowCreateAccount(true);
+    }
+  }, [profile.id]);
+
   const calculatePasswordStrength = (pwd: string) => {
     let strength = 0;
     if (pwd.length >= 8) strength++;
@@ -182,28 +188,11 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
       return;
     }
     try {
-      const response = await fetch('/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newAccount)
-      });
-      const data = await response.json();
-      if (response.ok) {
-        showNotification('Account created successfully!', [], 'success');
-        setShowCreateAccount(false);
-        setNewAccount({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
-        // Optionally, auto-login or redirect
-      } else {
-        if (data.error === 'Account already exists') {
-          showNotification('Account already exists. Please log in with your existing credentials.', [], 'info');
-          setShowCreateAccount(false);
-          setNewAccount({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
-        } else {
-          showNotification(data.error, [], 'error');
-        }
-      }
+      await onRegister(newAccount);
+      setShowCreateAccount(false);
+      setNewAccount({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
     } catch (err) {
-      showNotification('Error creating account.', [], 'error');
+      // onRegister handles notifications
     }
   };
 
@@ -264,20 +253,7 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
               </button>
             </div>
           </form>
-        ) : (
-          <div className="space-y-4">
-            <p className="text-[#8696a0] text-sm">No account found. Please create a new account to get started.</p>
-          </div>
-        )}
-
-        <div className="flex gap-4 justify-center">
-          <button
-            onClick={() => setShowCreateAccount(true)}
-            className="text-[#00a884] text-xs font-medium hover:text-white transition-colors flex items-center gap-1"
-          >
-            <UserPlus size={12} /> Create New Account
-          </button>
-        </div>
+        ) : null}
       </div>
     </div>
             {showForgotPassword && (

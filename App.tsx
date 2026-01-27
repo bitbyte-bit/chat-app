@@ -17,7 +17,6 @@ import Onboarding from './components/Onboarding';
 import DiscoveryView from './components/DiscoveryView';
 import AdminDashboard from './components/AdminDashboard';
 import Login from './components/Login';
-import ProfileSelector from './components/ProfileSelector';
 import PWAInstallBanner from './components/PWAInstallBanner';
 import BottomNav from './components/BottomNav';
 import { NotificationProvider, useNotification } from './components/NotificationProvider';
@@ -73,8 +72,7 @@ const App: React.FC = () => {
   const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false);
   const [call, setCall] = useState<CallState>({ isActive: false, type: null, contact: null });
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  const [showProfileSelector, setShowProfileSelector] = useState(false);
-  const [selectedProfileForLogin, setSelectedProfileForLogin] = useState<UserProfile | null>(null);
+  // Removed showProfileSelector and selectedProfileForLogin for single-user mode
 
   const socketRef = useRef<any>(null);
 
@@ -678,7 +676,7 @@ const App: React.FC = () => {
       case AppMode.PROFILE:
         return <ProfileView profile={viewedProfile || userProfile!} onUpdate={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, p.id]).then(() => { loadDataFromDb(); setViewedProfile(null); })} onBack={() => { setMode(AppMode.STATUS); setViewedProfile(null); }} isReadOnly={!!viewedProfile} />;
       case AppMode.SETTINGS:
-        return <SettingsView profile={userProfile!} contacts={contacts} onBack={() => setMode(AppMode.CHATS)} onUpdateSettings={(s) => dbRun("UPDATE profile SET settings_json = ? WHERE id = ?", [JSON.stringify({...userProfile!.settings, ...s}), userProfile!.id]).then(loadDataFromDb)} onUpdateProfile={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, userProfile!.id]).then(loadDataFromDb)} onUpdatePassword={(p) => dbRun("UPDATE profile SET password=? WHERE id=?", [p, userProfile!.id]).then(loadDataFromDb)} onUnblockContact={() => {}} onClearData={() => { window.location.reload(); }} onOpenAdmin={() => setMode(AppMode.ADMIN_DASHBOARD)} onSwitchAccount={() => { setIsAuthenticated(false); setSelectedProfileId(null); setShowProfileSelector(true); }} onLogout={handleLogout} />;
+        return <SettingsView profile={userProfile!} contacts={contacts} onBack={() => setMode(AppMode.CHATS)} onUpdateSettings={(s) => dbRun("UPDATE profile SET settings_json = ? WHERE id = ?", [JSON.stringify({...userProfile!.settings, ...s}), userProfile!.id]).then(loadDataFromDb)} onUpdateProfile={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, userProfile!.id]).then(loadDataFromDb)} onUpdatePassword={(p) => dbRun("UPDATE profile SET password=? WHERE id=?", [p, userProfile!.id]).then(loadDataFromDb)} onUnblockContact={() => {}} onClearData={() => { window.location.reload(); }} onOpenAdmin={() => setMode(AppMode.ADMIN_DASHBOARD)} onSwitchAccount={() => { setIsAuthenticated(false); setSelectedProfileId(null); }} onLogout={handleLogout} />;
       case AppMode.ADMIN_DASHBOARD:
         return <AdminDashboard onBack={() => setMode(AppMode.SETTINGS)} onBroadcast={(c) => socketRef.current?.emit("broadcast", { content: c })} tools={[]} loadTools={async () => await fetch('/api/tools').then(r => r.json()).catch(() => [])} />;
       default:
@@ -697,74 +695,6 @@ const App: React.FC = () => {
 
   // Determine what to show for authentication
   const renderAuth = () => {
-    if (selectedProfileForLogin) {
-      return (
-        <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-6">
-          <div className="bg-[#111b21] rounded-2xl p-6 w-full max-w-sm space-y-4">
-            <h3 className="text-white font-bold text-lg text-center">Enter Password</h3>
-            <p className="text-[#8696a0] text-sm text-center">Enter password for {selectedProfileForLogin.name}</p>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              const formData = new FormData(e.target as HTMLFormElement);
-              const password = formData.get('password') as string;
-              if (password === selectedProfileForLogin.password) {
-                setUserProfile(selectedProfileForLogin);
-                setSelectedProfileId(selectedProfileForLogin.id);
-                await deriveKeyFromPassword(password, selectedProfileForLogin.email);
-                setIsAuthenticated(true);
-                setSelectedProfileForLogin(null);
-              } else {
-                showNotification('Incorrect password', [], 'error');
-              }
-            }}>
-              <input
-                name="password"
-                type="password"
-                placeholder="Password"
-                className="w-full bg-[#202c33] border border-white rounded-xl py-3 px-4 text-white outline-none focus:border-[#00a884] transition-all"
-                required
-              />
-              <div className="flex gap-3 mt-4">
-                <button
-                  type="button"
-                  onClick={() => setSelectedProfileForLogin(null)}
-                  className="flex-1 bg-[#202c33] text-white py-3 rounded-xl"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-[#00a884] text-black font-bold py-3 rounded-xl"
-                >
-                  Unlock
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      );
-    }
-
-    if (showProfileSelector || (availableProfiles.length > 1 && !isAuthenticated)) {
-      return (
-        <ProfileSelector
-          profiles={availableProfiles}
-          currentProfile={userProfile}
-          onSelectProfile={(profile) => {
-            setSelectedProfileForLogin(profile);
-          }}
-          onCreateNew={() => {
-            setUserProfile(null);
-            setSelectedProfileId(null);
-            setShowProfileSelector(false);
-          }}
-          onLogout={() => {
-            setIsAuthenticated(false);
-            setShowProfileSelector(true);
-          }}
-        />
-      );
-    }
 
     if (!userProfile || !isAuthenticated) {
       return (
