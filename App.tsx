@@ -82,6 +82,16 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Keep-alive for Render free tier to prevent sleeping
+  useEffect(() => {
+    if (window.location.hostname !== 'localhost') {
+      const interval = setInterval(() => {
+        fetch('/ping').catch(console.error);
+      }, 10 * 60 * 1000); // 10 minutes
+      return () => clearInterval(interval);
+    }
+  }, []);
+
   const updateBadge = (count: number) => {
     if ("setAppBadge" in navigator) {
       if (count > 0) {

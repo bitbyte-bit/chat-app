@@ -476,10 +476,14 @@ const initDb = async () => {
 
 const startServer = async () => {
   await initDb();
-
+ 
   const PORT = 3001;
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Zenj Relay active on port ${PORT}`);
+    // Periodic resource monitoring
+    setInterval(() => {
+      logResources();
+    }, 60000); // Every minute
   });
 };
 
@@ -973,25 +977,42 @@ app.get('/api/metrics', async (req, res) => {
   }
 });
 
+app.get('/ping', (req, res) => {
+  res.send('pong');
+});
+
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-const users = new Map(); 
+const users = new Map();
 const sockets = new Map();
-
+// Logging function for resource monitoring
+const logResources = () => {
+  const memUsage = process.memoryUsage();
+  console.log(`Active connections: ${sockets.size}, Users: ${users.size}, Message chunks: ${messageChunks.size}`);
+  console.log(`Memory usage - RSS: ${(memUsage.rss / 1024 / 1024).toFixed(2)}MB, Heap: ${(memUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);
+};
+ 
 io.on('connection', (socket) => {
+  console.log(`New WebSocket connection: ${socket.id}`);
+  logResources();
+  socket.on('error', (error) => {
+    console.error(`WebSocket error for ${socket.id}:`, error);
+  });
   socket.on('register', async (userId) => {
     users.set(userId, socket.id);
     sockets.set(socket.id, userId);
-
+    console.log(`User registered: ${userId}, Socket: ${socket.id}`);
+    logResources();
     // Update directory status
     await db.run('UPDATE directory_users SET status = ? WHERE id = ?', 'online', userId);
-
+ 
     io.emit('user_status', { userId, status: 'online' });
   });
 
   socket.on('disconnect', async () => {
+    console.log(`WebSocket disconnected: ${socket.id}`);
     const userId = sockets.get(socket.id);
     if (userId) {
       await db.run('UPDATE directory_users SET status = ? WHERE id = ?', 'offline', userId);
@@ -999,9 +1020,11 @@ io.on('connection', (socket) => {
       users.delete(userId);
       sockets.delete(socket.id);
     }
+    logResources();
   });
 
   socket.on('send_message', async (data) => {
+    console.log(`Message sent from ${sockets.get(socket.id)} to ${data.contact_id}, type: ${data.type}`);
     const recipientId = data.contact_id;
     const isGroup = data.isGroup || false;
     await db.run(`
