@@ -6,6 +6,8 @@
 
 const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : window.location.origin;
 
+export let db: any = null;
+
 const safeFetch = async (url: string, options?: RequestInit) => {
   try {
     const controller = new AbortController();
@@ -30,7 +32,8 @@ const safeFetch = async (url: string, options?: RequestInit) => {
 
 export const initDatabase = async () => {
   safeFetch(`${API_BASE}/api/metrics`);
-  return true; 
+  // Note: db is initialized on server, client uses API
+  return true;
 };
 
 export const saveDatabase = () => Promise.resolve();

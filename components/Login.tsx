@@ -7,22 +7,21 @@ import { dbQuery, dbRun } from '../services/database';
 import { deriveKeyFromPassword } from '../services/crypto';
 
 interface LoginProps {
-  profile: UserProfile;
-  /**
-   * onLogin can be synchronous or asynchronous to support potential background tasks
-   * like cryptographic key derivation during the login process.
-   */
-  onLogin: (password: string) => boolean | Promise<boolean>;
-  onRegister?: (data: any) => void;
+   /**
+    * onLogin can be synchronous or asynchronous to support potential background tasks
+    * like cryptographic key derivation during the login process.
+    */
+   onLogin: (email: string, password: string) => boolean | Promise<boolean>;
+   onRegister?: (data: any) => void;
 }
 
-const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, onRegister }) => {
   const { confirm, showNotification } = useNotification();
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isProfileLink, setIsProfileLink] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [showCreateAccount, setShowCreateAccount] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
@@ -34,30 +33,6 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
   const [newAccount, setNewAccount] = useState({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
   const [passwordStrength, setPasswordStrength] = useState(0);
 
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const profileParam = urlParams.get('profile');
-    if (profileParam && profileParam === profile.id) {
-      setIsProfileLink(true);
-      // Update Open Graph meta tags
-      const ogTitle = document.querySelector('meta[property="og:title"]');
-      const ogDescription = document.querySelector('meta[property="og:description"]');
-      const ogImage = document.querySelector('meta[property="og:image"]');
-
-      if (ogTitle) ogTitle.setAttribute('content', `Welcome to Zenj - ${profile.name}`);
-      if (ogDescription) ogDescription.setAttribute('content', `Join ${profile.name} on Zenj, your minimalist AI companion. Real-time voice, video, and image generation.`);
-      if (ogImage) ogImage.setAttribute('content', profile.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.name)}`);
-
-      // Update page title
-      document.title = `Welcome to Zenj - ${profile.name}`;
-    }
-  }, [profile]);
-
-  useEffect(() => {
-    if (!profile.id) {
-      setShowCreateAccount(true);
-    }
-  }, [profile.id]);
 
   const calculatePasswordStrength = (pwd: string) => {
     let strength = 0;
@@ -79,14 +54,16 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
    */
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password) return;
-    
+    if (!email || !password) return;
+
     setIsLoading(true);
     try {
       // Execute and await the authentication check
-      const success = await onLogin(password);
+      const success = await onLogin(email, password);
       if (!success) {
         setError(true);
+        setEmail('');
+        setPassword('');
         setIsLoading(false);
       }
       // If successful, the parent component (App) will update isAuthenticated state,
@@ -94,6 +71,8 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
     } catch (err) {
       console.error('Login error:', err);
       setError(true);
+      setEmail('');
+      setPassword('');
       setIsLoading(false);
     }
   };
@@ -207,60 +186,66 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
         <div className="space-y-4">
           <div className="space-y-1">
             <h2 className="text-2xl font-bold text-white font-outfit">
-              {profile.id ? (isProfileLink ? `Welcome to Zenj, ${profile.name}!` : `Welcome back, ${profile.name}`) : 'Welcome to Zenj'}
+              Welcome back
             </h2>
-            <p className="text-[#8696a0] text-sm">{profile.id ? 'Please enter your password to unlock your presence.' : 'Please create an account to get started.'}</p>
+            <p className="text-[#8696a0] text-sm">Please enter your email and password to continue.</p>
           </div>
         </div>
 
-        {profile.id ? (
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-3">
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className={`w-full bg-[#202c33] border rounded-xl py-3 px-4 text-white outline-none transition-all ${error ? 'border-red-500' : 'border-white focus:border-[#00a884]'}`}
-                  disabled={isLoading}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[#8696a0] hover:text-white"
-                >
-                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
-              </div>
-              {error && <p className="text-red-500 text-sm">Incorrect password. Please try again.</p>}
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div className="space-y-3">
+            <input
+              type="email"
+              placeholder="Enter your email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className={`w-full bg-[#202c33] border rounded-xl py-3 px-4 text-white outline-none transition-all ${error ? 'border-red-500' : 'border-white focus:border-[#00a884]'}`}
+              disabled={isLoading}
+            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={`w-full bg-[#202c33] border rounded-xl py-3 px-4 text-white outline-none transition-all ${error ? 'border-red-500' : 'border-white focus:border-[#00a884]'}`}
+                disabled={isLoading}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[#8696a0] hover:text-white"
+              >
+                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+              </button>
             </div>
+            {error && <p className="text-red-500 text-sm">Invalid email or password. Please try again.</p>}
+          </div>
+          <button
+            type="submit"
+            disabled={isLoading || !email || !password}
+            className="w-full bg-[#00a884] text-black font-bold py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {isLoading ? <Loader2 size={20} className="animate-spin" /> : <Lock size={20} />}
+            {isLoading ? 'Signing in...' : 'Sign In'}
+          </button>
+          <div className="flex gap-4 justify-center">
             <button
-              type="submit"
-              disabled={isLoading || !password}
-              className="w-full bg-[#00a884] text-black font-bold py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              type="button"
+              onClick={() => setShowForgotPassword(true)}
+              className="text-[#00a884] text-xs font-medium hover:text-white transition-colors"
             >
-              {isLoading ? <Loader2 size={20} className="animate-spin" /> : <Lock size={20} />}
-              {isLoading ? 'Unlocking...' : 'Unlock'}
+              Forgot Password?
             </button>
-            <div className="flex gap-4 justify-center">
-              <button
-                type="button"
-                onClick={() => setShowForgotPassword(true)}
-                className="text-[#00a884] text-xs font-medium hover:text-white transition-colors"
-              >
-                Forgot Password?
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowCreateAccount(true)}
-                className="text-[#00a884] text-xs font-medium hover:text-white transition-colors"
-              >
-                Create Account
-              </button>
-            </div>
-          </form>
-        ) : null}
+            <button
+              type="button"
+              onClick={() => setShowCreateAccount(true)}
+              className="text-[#00a884] text-xs font-medium hover:text-white transition-colors"
+            >
+              Create Account
+            </button>
+          </div>
+        </form>
       </div>
     </div>
             {showForgotPassword && (

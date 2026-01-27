@@ -699,15 +699,25 @@ const App: React.FC = () => {
     if (!userProfile || !isAuthenticated) {
       return (
         <Login
-          profile={userProfile || DEFAULT_PROFILE}
-          onLogin={async (p) => {
-            if (!userProfile) return false;
-            if (p === userProfile.password) {
-              await deriveKeyFromPassword(p, userProfile.email);
-              setIsAuthenticated(true);
-              return true;
+          onLogin={async (email, password) => {
+            try {
+              const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+              });
+              if (res.ok) {
+                const user = await res.json();
+                setUserProfile(user);
+                await deriveKeyFromPassword(password, email);
+                setIsAuthenticated(true);
+                return true;
+              } else {
+                return false;
+              }
+            } catch {
+              return false;
             }
-            return false;
           }}
           onRegister={handleRegister}
         />

@@ -31,9 +31,10 @@ app.post('/api/register', async (req, res) => {
       return res.status(400).json({ error: 'Account already exists' });
     }
     const userId = `u-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const ip = req.ip || req.connection.remoteAddress;
     await db.run(
-      "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [userId, name, phone, email, password, '', `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`, 'user', 'active', JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), 'member']
+      "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [userId, name, phone, email, password, '', `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`, 'user', 'active', JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), 'member', ip]
     );
     // Also add to directory for discovery
     await db.run(
@@ -94,6 +95,37 @@ app.post('/api/reset-password', async (req, res) => {
   }
 });
 
+app.post('/api/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password required' });
+  }
+  try {
+    const user = await db.get('SELECT * FROM profile WHERE email = ?', [email]);
+    if (user && user.password === password) {
+      res.json(user);
+    } else {
+      res.status(401).json({ error: 'Invalid credentials' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.get('/api/check-device', async (req, res) => {
+  try {
+    const ip = req.ip || req.connection.remoteAddress;
+    const profiles = await db.all('SELECT * FROM profile WHERE ip = ?', [ip]);
+    if (profiles.length > 0) {
+      res.json({ registered: true, profile: profiles[0] });
+    } else {
+      res.json({ registered: false });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to check device' });
+  }
+});
+
 app.post('/api/update-status', async (req, res) => {
   const { userId, status } = req.body;
   if (!userId) {
@@ -142,7 +174,8 @@ const initDb = async () => {
       accountStatus TEXT,
       settings_json TEXT,
       status TEXT,
-      accountType TEXT
+      accountType TEXT,
+      ip TEXT
     );
 
     CREATE TABLE IF NOT EXISTS contacts (
@@ -813,7 +846,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('send_message', async (data) => {
-    const { recipientId, isGroup } = data;
+    const recipientId = data.contact_id;
+    const isGroup = data.isGroup || false;
     await db.run(`
       INSERT OR IGNORE INTO messages (id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status, reply_to_id, reply_to_text)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -829,7 +863,9 @@ io.on('connection', (socket) => {
   });
 
   socket.on('send_message_chunk', async (data) => {
-    const { id, chunk, chunkIndex, totalChunks, recipientId, isGroup } = data;
+    const recipientId = data.contact_id;
+    const isGroup = data.isGroup || false;
+    const { id, chunk, chunkIndex, totalChunks } = data;
     if (!messageChunks.has(id)) {
       messageChunks.set(id, { chunks: [], received: 0, data });
     }
