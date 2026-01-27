@@ -141,7 +141,8 @@ const initDb = async () => {
       role TEXT,
       accountStatus TEXT,
       settings_json TEXT,
-      status TEXT
+      status TEXT,
+      accountType TEXT
     );
 
     CREATE TABLE IF NOT EXISTS contacts (
