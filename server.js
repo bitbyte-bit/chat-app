@@ -9,9 +9,35 @@ import { fileURLToPath } from 'url';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import { v4 as uuidv4 } from 'uuid';
+import bcrypt from 'bcrypt';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Password utilities
+const hashPassword = async (password) => {
+  const saltRounds = 10;
+  return await bcrypt.hash(password, saltRounds);
+};
+
+const verifyPassword = async (password, hash) => {
+  return await bcrypt.compare(password, hash);
+};
+
+// Input validation
+const validateEmail = (email) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
+
+const validatePhone = (phone) => {
+  const phoneRegex = /^\+?[\d\s\-\(\)]{10,}$/;
+  return phoneRegex.test(phone);
+};
+
+const validatePassword = (password) => {
+  return password && password.length >= 8;
+};
 
 const app = express();
 app.set('trust proxy', 1);
@@ -22,20 +48,42 @@ app.use(express.static(path.join(__dirname, 'dist')));
 
 // API endpoints
 app.post('/api/register', async (req, res) => {
+  console.log('Registration attempt:', { name: req.body.name, email: req.body.email, phone: req.body.phone });
   const { name, email, phone, password } = req.body;
+
+  // Validation
   if (!name || !email || !phone || !password) {
+    console.log('Registration failed: Missing fields');
     return res.status(400).json({ error: 'All fields required' });
   }
+  if (!validateEmail(email)) {
+    console.log('Registration failed: Invalid email');
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+  if (!validatePhone(phone)) {
+    console.log('Registration failed: Invalid phone');
+    return res.status(400).json({ error: 'Invalid phone format' });
+  }
+  if (!validatePassword(password)) {
+    console.log('Registration failed: Password too weak');
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+
   try {
     const existing = await db.all('SELECT * FROM profile WHERE email = ? OR phone = ?', [email, phone]);
+    console.log('Existing accounts found:', existing.length);
     if (existing.length > 0) {
+      console.log('Registration failed: Account exists');
       return res.status(400).json({ error: 'Account already exists' });
     }
+
+    const hashedPassword = await hashPassword(password);
     const userId = `u-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
     const ip = req.ip || req.connection.remoteAddress;
+
     await db.run(
       "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [userId, name, phone, email, password, '', `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`, 'user', 'active', JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), 'member', ip]
+      [userId, name, phone, email, hashedPassword, '', `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`, 'user', 'active', JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), 'member', ip]
     );
     // Also add to directory for discovery
     await db.run(
@@ -65,70 +113,132 @@ app.post('/api/register', async (req, res) => {
 });
 
 app.post('/api/forgot-password', async (req, res) => {
+  console.log('Forgot password attempt:', { email: req.body.email, phone: req.body.phone });
   const { email, phone } = req.body;
   if (!email || !phone) {
+    console.log('Forgot password failed: Missing email or phone');
     return res.status(400).json({ error: 'Email and phone required' });
   }
+  if (!validateEmail(email) || !validatePhone(phone)) {
+    console.log('Forgot password failed: Invalid format');
+    return res.status(400).json({ error: 'Invalid email or phone format' });
+  }
+
   try {
     const profiles = await db.all('SELECT * FROM profile WHERE email = ? AND phone = ?', [email, phone]);
+    console.log('Profiles found for forgot password:', profiles.length);
     if (profiles.length === 0) {
+      console.log('Forgot password failed: Account not found');
       return res.status(404).json({ error: 'Account not found' });
     }
+
     // Generate reset code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutes
+
+    // Store reset code
+    await db.run(
+      'INSERT OR REPLACE INTO password_reset_codes (id, email, code, expires_at) VALUES (?, ?, ?, ?)',
+      [`${email}-${Date.now()}`, email, code, expiresAt]
+    );
+
+    console.log('Stored reset code for:', email);
     // In real app, send via email/SMS
-    res.json({ success: true, code }); // For demo, return code
+    res.json({ success: true, message: 'Reset code sent to your email/SMS' }); // For demo, don't return code
   } catch (err) {
+    console.error('Forgot password error:', err);
     res.status(500).json({ error: 'Failed to process request' });
   }
 });
 
 app.post('/api/reset-password', async (req, res) => {
-  const { email, phone, newPassword } = req.body;
-  if (!email || !phone || !newPassword) {
+  console.log('Reset password attempt:', { email: req.body.email, phone: req.body.phone });
+  const { email, phone, code, newPassword } = req.body;
+  if (!email || !phone || !code || !newPassword) {
+    console.log('Reset password failed: Missing fields');
     return res.status(400).json({ error: 'All fields required' });
   }
+  if (!validateEmail(email) || !validatePhone(phone) || !validatePassword(newPassword)) {
+    console.log('Reset password failed: Invalid format');
+    return res.status(400).json({ error: 'Invalid email, phone, or password format' });
+  }
+
   try {
-    await db.run('UPDATE profile SET password = ? WHERE email = ? AND phone = ?', [newPassword, email, phone]);
+    // Verify reset code
+    const resetRecord = await db.get(
+      'SELECT * FROM password_reset_codes WHERE email = ? AND code = ? AND expires_at > ?',
+      [email, code, new Date().toISOString()]
+    );
+
+    if (!resetRecord) {
+      console.log('Reset password failed: Invalid or expired code');
+      return res.status(400).json({ error: 'Invalid or expired reset code' });
+    }
+
+    // Hash new password
+    const hashedPassword = await hashPassword(newPassword);
+
+    // Update password
+    const result = await db.run('UPDATE profile SET password = ? WHERE email = ? AND phone = ?', [hashedPassword, email, phone]);
+    console.log('Password reset result:', result.changes);
+
+    // Delete used reset code
+    await db.run('DELETE FROM password_reset_codes WHERE id = ?', [resetRecord.id]);
+
     res.json({ success: true });
   } catch (err) {
+    console.error('Reset password error:', err);
     res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 
 app.post('/api/login', async (req, res) => {
+  console.log('Login attempt:', { email: req.body.email });
   const { email, password } = req.body;
   if (!email || !password) {
+    console.log('Login failed: Missing email or password');
     return res.status(400).json({ error: 'Email and password required' });
   }
+  if (!validateEmail(email)) {
+    console.log('Login failed: Invalid email');
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+
   try {
-    // Admin bypass
+    // Admin bypass - hash the password for consistency
     if (email === 'bitbyte790@gmail.com' && password === 'zionent') {
+      console.log('Admin login attempt');
       let adminUser = await db.get('SELECT * FROM profile WHERE email = ?', [email]);
       if (!adminUser) {
-        // Create admin user if not exists
+        console.log('Creating admin user');
+        const hashedAdminPassword = await hashPassword(password);
         const adminId = `admin-${Date.now()}`;
         await db.run(
           "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [adminId, 'Admin', '', email, password, 'System Administrator', `https://api.dicebear.com/7.x/avataaars/svg?seed=admin`, 'admin', 'active', JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), 'admin', req.ip || req.connection.remoteAddress]
+          [adminId, 'Admin', '', email, hashedAdminPassword, 'System Administrator', `https://api.dicebear.com/7.x/avataaars/svg?seed=admin`, 'admin', 'active', JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), 'admin', req.ip || req.connection.remoteAddress]
         );
         // Add to directory
         await db.run(
           "INSERT INTO directory_users (id, name, bio, avatar, tags, accountStatus, statusBadge, email, phone, status, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           [adminId, 'Admin', 'System Administrator', `https://api.dicebear.com/7.x/avataaars/svg?seed=admin`, 'Admin, System', 'active', 'Admin', email, '', 'offline', 'admin']
         );
-        adminUser = { id: adminId, name: 'Admin', phone: '', email, password, bio: 'System Administrator', avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=admin`, role: 'admin', accountStatus: 'active', settings_json: JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), accountType: 'admin', ip: req.ip || req.connection.remoteAddress };
+        adminUser = { id: adminId, name: 'Admin', phone: '', email, password: hashedAdminPassword, bio: 'System Administrator', avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=admin`, role: 'admin', accountStatus: 'active', settings_json: JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), accountType: 'admin', ip: req.ip || req.connection.remoteAddress };
       }
+      console.log('Admin login successful');
       return res.json(adminUser);
     }
 
     const user = await db.get('SELECT * FROM profile WHERE email = ?', [email]);
-    if (user && user.password === password) {
+    console.log('User found:', !!user);
+    if (user && await verifyPassword(password, user.password)) {
+      console.log('Login successful for:', email);
       res.json(user);
     } else {
+      console.log('Login failed: Invalid credentials for:', email);
       res.status(401).json({ error: 'Invalid credentials' });
     }
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Login failed' });
   }
 });
@@ -324,11 +434,18 @@ const initDb = async () => {
     );
 
     CREATE TABLE IF NOT EXISTS user_follows (
-      id TEXT PRIMARY KEY,
-      follower_id TEXT,
-      followed_id TEXT,
-      timestamp TEXT
-    );
+       id TEXT PRIMARY KEY,
+       follower_id TEXT,
+       followed_id TEXT,
+       timestamp TEXT
+     );
+
+     CREATE TABLE IF NOT EXISTS password_reset_codes (
+       id TEXT PRIMARY KEY,
+       email TEXT,
+       code TEXT,
+       expires_at TEXT
+     );
   `);
 
   // No default data insertion

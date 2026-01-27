@@ -27,7 +27,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onRegister }) => {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotPhone, setForgotPhone] = useState('');
   const [resetCode, setResetCode] = useState('');
-  const [generatedResetCode, setGeneratedResetCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [newAccount, setNewAccount] = useState({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
@@ -90,8 +90,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, onRegister }) => {
       });
       const data = await response.json();
       if (response.ok) {
-        setGeneratedResetCode(data.code);
-        showNotification(`Reset code sent: ${data.code} (In production, this would be emailed/SMS)`, [], 'info');
+        setCodeSent(true);
+        showNotification('Reset code sent to your email/SMS. Please check and enter the code below.', [], 'info');
       } else {
         if (data.error === 'Account not found') {
           showNotification('Account not found. Redirecting to create new account.', [], 'error');
@@ -115,24 +115,20 @@ const Login: React.FC<LoginProps> = ({ onLogin, onRegister }) => {
       showNotification('Passwords do not match.', [], 'error');
       return;
     }
-    if (resetCode !== generatedResetCode) {
-      showNotification('Invalid reset code.', [], 'error');
-      return;
-    }
     try {
       const response = await fetch('/api/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotEmail, phone: forgotPhone, newPassword })
+        body: JSON.stringify({ email: forgotEmail, phone: forgotPhone, code: resetCode, newPassword })
       });
       const data = await response.json();
       if (response.ok) {
         showNotification('Password reset successfully!', [], 'success');
         setShowForgotPassword(false);
+        setCodeSent(false);
         setResetCode('');
         setNewPassword('');
         setConfirmPassword('');
-        setGeneratedResetCode('');
       } else {
         showNotification(data.error, [], 'error');
       }
@@ -252,7 +248,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onRegister }) => {
               <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-6">
                 <div className="bg-[#111b21] rounded-2xl p-6 w-full max-w-sm space-y-4">
                   <h3 className="text-white font-bold text-lg text-center">Forgot Password</h3>
-                  {!generatedResetCode ? (
+                  {!codeSent ? (
                     <div>
                 <p className="text-[#8696a0] text-sm text-center">Enter your email and phone to receive a reset code.</p>
                 <input
@@ -312,7 +308,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onRegister }) => {
                   <button
                     onClick={() => {
                       setShowForgotPassword(false);
-                      setGeneratedResetCode('');
+                      setCodeSent(false);
                       setResetCode('');
                       setNewPassword('');
                       setConfirmPassword('');
