@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Search, UserPlus, Sparkles, Check, Filter, Compass, UserCircle, Plus, Info } from 'lucide-react';
 import { UserProfile, AccountStatus } from '../types';
 
@@ -31,6 +31,10 @@ const DiscoveryView: React.FC<DiscoveryViewProps> = ({ users, onConnect, connect
     // Don't show "You" in discovery to keep it focused on finding others
     return users.filter(u => u.id !== currentUser.id);
   }, [users, currentUser]);
+
+  useEffect(() => {
+    console.log('[DEBUG] DiscoveryView re-rendered with users:', users.length);
+  }, [users]);
 
   const filteredUsers = useMemo(() => {
     let result = allUsers;

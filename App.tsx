@@ -160,12 +160,13 @@ const App: React.FC = () => {
       socketRef.current = socket;
 
       socket.on("receive_message", async (data: any) => {
+        console.log('[DEBUG] Socket receive_message event fired');
         const timestamp = data.timestamp || Date.now();
         await dbRun(
           "INSERT INTO messages (id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           [data.id, data.contact_id || data.senderId, 'assistant', data.content, timestamp, data.type || 'text', data.mediaUrl, data.fileName, data.fileSize, 'delivered']
         );
-        
+
         const sender = contacts.find(c => c.id === (data.contact_id || data.senderId));
         const decText = await decryptContent(data.content);
         if (userProfile.settings.notifications) {
@@ -175,6 +176,7 @@ const App: React.FC = () => {
       });
 
       socket.on("broadcast", async (data: any) => {
+        console.log('[DEBUG] Socket broadcast event fired');
         const timestamp = Date.now();
         const encrypted = await encryptContent(`📢 System Signal: ${data.content}`);
         await dbRun(
@@ -186,8 +188,8 @@ const App: React.FC = () => {
         }
         await loadDataFromDb();
       });
-      socket.on("user_status", loadDataFromDb);
-      socket.on("user_added", loadDataFromDb);
+      socket.on("user_status", () => { console.log('[DEBUG] Socket user_status event fired'); loadDataFromDb(); });
+      socket.on("user_added", () => { console.log('[DEBUG] Socket user_added event fired'); loadDataFromDb(); });
       socket.on("new_notification", (notif) => setNotifications(prev => [notif, ...prev.filter(n => n.id !== notif.id)]));
       socket.on("update_notification", (notif) => setNotifications(prev => prev.map(n => n.id === notif.id ? notif : n)));
       socket.on("delete_notification", ({ id }) => setNotifications(prev => prev.filter(n => n.id !== id)));
@@ -223,6 +225,7 @@ const App: React.FC = () => {
   }, [userProfile?.settings]);
 
   const loadDataFromDb = async () => {
+    console.log('[DEBUG] loadDataFromDb called at', new Date().toISOString());
     const [profileRows, messageRows, contactRows, dirRows, momentRows, notifRows] = await Promise.all([
       dbQuery("SELECT * FROM profile"),
       dbQuery("SELECT * FROM messages ORDER BY timestamp DESC LIMIT 2000"),
@@ -231,6 +234,7 @@ const App: React.FC = () => {
       dbQuery("SELECT * FROM moments ORDER BY timestamp DESC LIMIT 100"),
       fetch('/api/notifications').then(r => r.json()).catch(() => [])
     ]);
+    console.log('[DEBUG] loadDataFromDb completed, contacts:', contactRows.length, 'directoryUsers:', dirRows.length);
 
     // Load all available profiles
     const profiles = profileRows.map((p: any) => {
