@@ -251,6 +251,13 @@ const Login: React.FC<LoginProps> = ({ profile, onLogin, onRegister }) => {
               >
                 Forgot Password?
               </button>
+              <button
+                type="button"
+                onClick={() => setShowCreateAccount(true)}
+                className="text-[#00a884] text-xs font-medium hover:text-white transition-colors"
+              >
+                Create Account
+              </button>
             </div>
           </form>
         ) : null}
