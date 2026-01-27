@@ -48,7 +48,6 @@ app.use(express.static(path.join(__dirname, 'dist')));
 
 // API endpoints
 app.post('/api/register', async (req, res) => {
-  console.log('Registration attempt:', { name: req.body.name, email: req.body.email, phone: req.body.phone });
   const { name, email, phone, password } = req.body;
 
   // Validation
@@ -70,20 +69,19 @@ app.post('/api/register', async (req, res) => {
   }
 
   try {
-    const existing = await db.all('SELECT * FROM profile WHERE email = ? OR phone = ?', [email, phone]);
-    console.log('Existing accounts found:', existing.length);
+    const existingByEmail = await db.get('SELECT * FROM profile WHERE email = ?', [email]);
+    const existingByPhone = await db.get('SELECT * FROM profile WHERE phone = ?', [phone]);
 
     let userId;
-    if (existing.length > 0) {
-      // Account exists, verify password and log them in
-      const account = existing[0];
-      const passwordMatch = await verifyPassword(password, account.password);
+    if (existingByEmail) {
+      // If email exists, verify password and login
+      const passwordMatch = await verifyPassword(password, existingByEmail.password);
       if (!passwordMatch) {
-        console.log('Registration failed: Invalid password for existing account');
-        return res.status(400).json({ error: 'Account exists with different password. Please use login instead.' });
+        return res.status(400).json({ error: 'Account with this email already exists. Please use login instead.' });
       }
-      userId = account.id;
-      console.log('Existing account found, logging in user:', userId);
+      userId = existingByEmail.id;
+    } else if (existingByPhone) {
+      return res.status(400).json({ error: 'Account with this phone number already exists. Please use a different phone number or login with the existing account.' });
     } else {
       // Create new account
       const hashedPassword = await hashPassword(password);
@@ -207,7 +205,6 @@ app.post('/api/reset-password', async (req, res) => {
 });
 
 app.post('/api/login', async (req, res) => {
-  console.log('Login attempt:', { email: req.body.email });
   const { email, password } = req.body;
   if (!email || !password) {
     console.log('Login failed: Missing email or password');
@@ -243,12 +240,9 @@ app.post('/api/login', async (req, res) => {
     }
 
     const user = await db.get('SELECT * FROM profile WHERE email = ?', [email]);
-    console.log('User found:', !!user);
     if (user && await verifyPassword(password, user.password)) {
-      console.log('Login successful for:', email);
       res.json(user);
     } else {
-      console.log('Login failed: Invalid credentials for:', email);
       res.status(401).json({ error: 'Invalid credentials' });
     }
   } catch (err) {
@@ -460,9 +454,19 @@ const initDb = async () => {
        code TEXT,
        expires_at TEXT
      );
-  `);
+ `);
 
-  // No default data insertion
+ // Add ip column if it doesn't exist (for existing databases)
+ try {
+   await db.run(`ALTER TABLE profile ADD COLUMN ip TEXT;`);
+ } catch (err) {
+   // Ignore error if column already exists
+   if (!err.message.includes('duplicate column name')) {
+     console.error('Error adding ip column:', err);
+   }
+ }
+
+ // No default data insertion
 
   const installsExists = await db.get('SELECT id FROM system_metrics WHERE id = ?', 'installs');
   if (!installsExists) {
