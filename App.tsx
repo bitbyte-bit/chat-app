@@ -713,6 +713,8 @@ const App: React.FC = () => {
                 setUserProfile(user);
                 await deriveKeyFromPassword(password, email);
                 setIsAuthenticated(true);
+                localStorage.setItem('lastUserName', user.name);
+                localStorage.setItem('lastUserEmail', email);
                 return true;
               } else {
                 return false;

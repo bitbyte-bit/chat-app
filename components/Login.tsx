@@ -32,6 +32,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onRegister }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [newAccount, setNewAccount] = useState({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
   const [passwordStrength, setPasswordStrength] = useState(0);
+  const [welcomeMessage, setWelcomeMessage] = useState('Welcome back');
 
 
   const calculatePasswordStrength = (pwd: string) => {
@@ -47,6 +48,15 @@ const Login: React.FC<LoginProps> = ({ onLogin, onRegister }) => {
   useEffect(() => {
     setPasswordStrength(calculatePasswordStrength(newAccount.password));
   }, [newAccount.password]);
+
+  useEffect(() => {
+    const lastUserName = localStorage.getItem('lastUserName');
+    if (lastUserName) {
+      setWelcomeMessage(`Welcome back ${lastUserName}`);
+    } else {
+      setWelcomeMessage('Welcome back');
+    }
+  }, []);
 
   /**
    * handleLogin is now async to properly await the result of onLogin,
@@ -182,7 +192,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onRegister }) => {
         <div className="space-y-4">
           <div className="space-y-1">
             <h2 className="text-2xl font-bold text-white font-outfit">
-              Welcome back
+              {welcomeMessage}
             </h2>
             <p className="text-[#8696a0] text-sm">Please enter your email and password to continue.</p>
           </div>
