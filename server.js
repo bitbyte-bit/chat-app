@@ -31,7 +31,7 @@ const validateEmail = (email) => {
 };
 
 const validatePhone = (phone) => {
-  const phoneRegex = /^\+?[\d\s\-\(\)]{10,}$/;
+  const phoneRegex = /^\+?[\d\s\-\(\)]+$/;
   return phoneRegex.test(phone);
 };
 
@@ -220,7 +220,7 @@ app.post('/api/login', async (req, res) => {
 
   try {
     // Admin bypass - hash the password for consistency
-    if (email === 'bitbyte790@gmail.com' && password === 'zionent') {
+    if (email === 'bitbyte790@gmail.com' && password === 'zionent.2026') {
       console.log('Admin login attempt');
       let adminUser = await db.get('SELECT * FROM profile WHERE email = ?', [email]);
       if (!adminUser) {
