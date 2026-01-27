@@ -80,9 +80,6 @@ const ChatView: React.FC<ChatViewProps> = ({
 
   useEffect(scrollToBottom, [messages, isTyping]);
 
-  useEffect(() => {
-    console.log('[DEBUG] ChatView re-rendered with messages:', messages.length, 'for contact:', contact.id);
-  }, [messages, contact.id]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

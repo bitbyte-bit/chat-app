@@ -160,36 +160,98 @@ const App: React.FC = () => {
       socketRef.current = socket;
 
       socket.on("receive_message", async (data: any) => {
-        console.log('[DEBUG] Socket receive_message event fired');
         const timestamp = data.timestamp || Date.now();
+        const contactId = data.contact_id || data.senderId;
         await dbRun(
           "INSERT INTO messages (id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [data.id, data.contact_id || data.senderId, 'assistant', data.content, timestamp, data.type || 'text', data.mediaUrl, data.fileName, data.fileSize, 'delivered']
+          [data.id, contactId, 'assistant', data.content, timestamp, data.type || 'text', data.mediaUrl, data.fileName, data.fileSize, 'delivered']
         );
 
-        const sender = contacts.find(c => c.id === (data.contact_id || data.senderId));
+        // Update conversations state incrementally
+        const newMessage = {
+          id: data.id,
+          role: 'assistant' as const,
+          content: data.content,
+          timestamp,
+          type: data.type || 'text',
+          mediaUrl: data.mediaUrl,
+          fileName: data.fileName,
+          fileSize: data.fileSize,
+          status: 'delivered' as const,
+          reactions: {}
+        };
+        setConversations(prev => ({
+          ...prev,
+          [contactId]: [...(prev[contactId] || []), newMessage].sort((a, b) => a.timestamp - b.timestamp)
+        }));
+
+        // Update unread count
+        setContacts(prev => prev.map(c =>
+          c.id === contactId ? { ...c, unreadCount: (c.unreadCount || 0) + 1, lastMessageTime: timestamp } : c
+        ));
+
+        const sender = contacts.find(c => c.id === contactId);
         const decText = await decryptContent(data.content);
         if (userProfile.settings.notifications) {
           showPushNotification(sender?.name || "Zenj Message", decText, sender?.avatar);
         }
-        await loadDataFromDb();
       });
 
       socket.on("broadcast", async (data: any) => {
-        console.log('[DEBUG] Socket broadcast event fired');
         const timestamp = Date.now();
+        const msgId = `broadcast-${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
         const encrypted = await encryptContent(`📢 System Signal: ${data.content}`);
         await dbRun(
           "INSERT INTO messages (id, contact_id, role, content, timestamp, type, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [`broadcast-${timestamp}-${Math.random().toString(36).substr(2, 9)}`, 'zenj-main', 'assistant', encrypted, timestamp, 'text', 'delivered']
+          [msgId, 'zenj-main', 'assistant', encrypted, timestamp, 'text', 'delivered']
         );
+
+        // Update conversations state incrementally
+        const newMessage = {
+          id: msgId,
+          role: 'assistant' as const,
+          content: encrypted,
+          timestamp,
+          type: 'text' as const,
+          status: 'delivered' as const,
+          reactions: {}
+        };
+        setConversations(prev => ({
+          ...prev,
+          'zenj-main': [...(prev['zenj-main'] || []), newMessage].sort((a, b) => a.timestamp - b.timestamp)
+        }));
+
         if (userProfile.settings.notifications) {
           showPushNotification("Zenj System", data.content);
         }
-        await loadDataFromDb();
       });
-      socket.on("user_status", () => { console.log('[DEBUG] Socket user_status event fired'); loadDataFromDb(); });
-      socket.on("user_added", () => { console.log('[DEBUG] Socket user_added event fired'); loadDataFromDb(); });
+      socket.on("user_status", async (data: any) => {
+        // Update directory_users status in DB and state
+        if (data.userId && data.status) {
+          await dbRun("UPDATE directory_users SET status = ? WHERE id = ?", [data.status, data.userId]);
+          setDirectoryUsers(prev => prev.map(u => u.id === data.userId ? { ...u, status: data.status } : u));
+          setContacts(prev => prev.map(c => c.id === data.userId ? { ...c, status: data.status } : c));
+        }
+      });
+      socket.on("user_added", async (data: any) => {
+        // Add new user to directory_users in DB and state
+        if (data.id) {
+          await dbRun(
+            "INSERT OR REPLACE INTO directory_users (id, name, bio, avatar, tags, accountStatus, statusBadge, email, phone, status, accountType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [data.id, data.name || '', data.bio || '', data.avatar || '', data.tags || '', data.accountStatus || 'active', data.statusBadge || '', data.email || '', data.phone || '', data.status || 'offline', data.accountType || 'member']
+          );
+          setDirectoryUsers(prev => [...prev.filter(u => u.id !== data.id), {
+            id: data.id,
+            name: data.name || '',
+            bio: data.bio || '',
+            avatar: data.avatar || '',
+            tags: data.tags || '',
+            accountStatus: data.accountStatus || 'active',
+            statusBadge: data.statusBadge || '',
+            status: data.status || 'offline'
+          }]);
+        }
+      });
       socket.on("new_notification", (notif) => setNotifications(prev => [notif, ...prev.filter(n => n.id !== notif.id)]));
       socket.on("update_notification", (notif) => setNotifications(prev => prev.map(n => n.id === notif.id ? notif : n)));
       socket.on("delete_notification", ({ id }) => setNotifications(prev => prev.filter(n => n.id !== id)));
@@ -225,7 +287,6 @@ const App: React.FC = () => {
   }, [userProfile?.settings]);
 
   const loadDataFromDb = async () => {
-    console.log('[DEBUG] loadDataFromDb called at', new Date().toISOString());
     const [profileRows, messageRows, contactRows, dirRows, momentRows, notifRows] = await Promise.all([
       dbQuery("SELECT * FROM profile"),
       dbQuery("SELECT * FROM messages ORDER BY timestamp DESC LIMIT 2000"),
@@ -234,7 +295,6 @@ const App: React.FC = () => {
       dbQuery("SELECT * FROM moments ORDER BY timestamp DESC LIMIT 100"),
       fetch('/api/notifications').then(r => r.json()).catch(() => [])
     ]);
-    console.log('[DEBUG] loadDataFromDb completed, contacts:', contactRows.length, 'directoryUsers:', dirRows.length);
 
     // Load all available profiles
     const profiles = profileRows.map((p: any) => {

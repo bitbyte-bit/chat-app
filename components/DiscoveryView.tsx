@@ -32,9 +32,6 @@ const DiscoveryView: React.FC<DiscoveryViewProps> = ({ users, onConnect, connect
     return users.filter(u => u.id !== currentUser.id);
   }, [users, currentUser]);
 
-  useEffect(() => {
-    console.log('[DEBUG] DiscoveryView re-rendered with users:', users.length);
-  }, [users]);
 
   const filteredUsers = useMemo(() => {
     let result = allUsers;
