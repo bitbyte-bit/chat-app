@@ -5,7 +5,7 @@ import { io } from "socket.io-client";
 let socket: any = null;
 
 export const initSocket = (userId: string): any => {
-  // Use current host but point to the Node server port (usually 3001 in dev)
+  // Use current host but point to the Node server port (usually 3002 in dev)
   // Or fallback to origin if running behind a proxy
   const SOCKET_URL = window.location.hostname === 'localhost'
     ? "http://localhost:3001"

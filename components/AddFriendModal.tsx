@@ -31,7 +31,7 @@ const AddFriendModal: React.FC<AddFriendModalProps> = ({ isOpen, onClose, onAdd,
   };
 
   const handleShareInvite = async () => {
-    const inviteLink = `https://zenj.ai/register?ref=${encodeURIComponent(phone)}&inviter=${encodeURIComponent(userName)}`;
+    const inviteLink = `${window.location.origin}/register?ref=${encodeURIComponent(phone)}&inviter=${encodeURIComponent(userName)}`;
     try {
       if (navigator.share) {
         await navigator.share({

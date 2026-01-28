@@ -137,7 +137,7 @@ const App: React.FC = () => {
         fetch('/api/metrics').catch(console.error);
         // Log user activity
         logMetric('user_activity', 1);
-        await loadDataFromDb();
+        await loadDataFromDb(false);
 
         // Check connection twice
         let connectionOk = false;
@@ -177,6 +177,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (isAuthenticated && userProfile) {
+      // Load user data
+      loadDataFromDb(true);
+
       // Disconnect any existing socket
       if (socketRef.current) {
         socketRef.current.disconnect();
@@ -326,15 +329,23 @@ const App: React.FC = () => {
     }
   }, [userProfile?.settings]);
 
-  const loadDataFromDb = async () => {
-    const [profileRows, messageRows, contactRows, dirRows, momentRows, notifRows] = await Promise.all([
+  const loadDataFromDb = async (loadMessages = true) => {
+    const queries = [
       dbQuery("SELECT * FROM profile"),
-      dbQuery("SELECT * FROM messages ORDER BY timestamp DESC LIMIT 2000"),
-      dbQuery("SELECT * FROM contacts ORDER BY lastMessageTime DESC"),
       dbQuery("SELECT * FROM directory_users"),
       dbQuery("SELECT * FROM moments ORDER BY timestamp DESC LIMIT 100"),
       fetch('/api/notifications').then(r => r.ok ? r.json() : []).catch(() => [])
-    ]);
+    ];
+
+    if (loadMessages) {
+      queries.push(dbQuery("SELECT * FROM messages ORDER BY timestamp DESC LIMIT 2000"));
+      queries.push(dbQuery("SELECT * FROM contacts ORDER BY lastMessageTime DESC"));
+    } else {
+      queries.push(Promise.resolve([])); // empty messages
+      queries.push(Promise.resolve([])); // empty contacts
+    }
+
+    const [profileRows, dirRows, momentRows, notifRows, messageRows, contactRows] = await Promise.all(queries);
 
     // Load all available profiles
     const profiles = profileRows.map((p: any) => {

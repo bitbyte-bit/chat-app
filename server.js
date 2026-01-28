@@ -495,15 +495,18 @@ startServer();
 app.get('/api/profile', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'];
-    if (!userId) {
-      return res.status(401).json({ error: 'User not authenticated' });
+    if (userId) {
+      // Return specific user profile
+      const profile = await db.get('SELECT * FROM profile WHERE id = ?', userId);
+      if (!profile) {
+        return res.status(404).json({ error: 'Profile not found' });
+      }
+      res.json(profile);
+    } else {
+      // Return all profiles for profile selector
+      const profiles = await db.all('SELECT * FROM profile');
+      res.json(profiles);
     }
-    const profile = await db.get('SELECT * FROM profile WHERE id = ?', userId);
-    if (!profile) {
-      return res.status(404).json({ error: 'Profile not found' });
-    }
-    console.log('DEBUG: /api/profile returning profile for user', userId);
-    res.json(profile);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
