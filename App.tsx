@@ -143,13 +143,13 @@ const App: React.FC = () => {
         let connectionOk = false;
         const serverUrl = window.location.hostname === 'localhost' ? 'http://localhost:3001' : window.location.origin;
         try {
-          const res = await fetch(`${serverUrl}/api/profile`);
+          const res = await fetch(`${serverUrl}/ping`);
           if (res.ok) connectionOk = true;
         } catch {}
         if (!connectionOk) {
           await new Promise(resolve => setTimeout(resolve, 1000));
           try {
-            const res = await fetch(`${serverUrl}/api/profile`);
+            const res = await fetch(`${serverUrl}/ping`);
             if (res.ok) connectionOk = true;
           } catch {}
         }
