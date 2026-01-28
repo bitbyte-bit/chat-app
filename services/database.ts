@@ -12,7 +12,12 @@ const safeFetch = async (url: string, options?: RequestInit, timeoutMs: number =
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, { ...options, signal: controller.signal });
+    const userId = localStorage.getItem('currentUserId');
+    const headers = { ...options?.headers };
+    if (userId) {
+      headers['X-User-Id'] = userId;
+    }
+    const res = await fetch(url, { ...options, headers, signal: controller.signal });
     clearTimeout(timeoutId);
 
     if (!res.ok) {

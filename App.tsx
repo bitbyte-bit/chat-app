@@ -469,6 +469,8 @@ const App: React.FC = () => {
       socketRef.current.disconnect();
       socketRef.current = null;
     }
+    // Clear user ID
+    localStorage.removeItem('currentUserId');
     // Set authenticated to false to show login screen
     setIsAuthenticated(false);
   };
@@ -756,6 +758,7 @@ const App: React.FC = () => {
               if (res.ok) {
                 const user = await res.json();
                 setUserProfile(user);
+                localStorage.setItem('currentUserId', user.id);
                 await deriveKeyFromPassword(password, email);
                 setIsAuthenticated(true);
                 localStorage.setItem('lastUserName', user.name);

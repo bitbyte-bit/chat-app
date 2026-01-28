@@ -319,6 +319,7 @@ const initDb = async () => {
 
     CREATE TABLE IF NOT EXISTS contacts (
       id TEXT PRIMARY KEY,
+      user_id TEXT,
       name TEXT,
       avatar TEXT,
       status TEXT,
@@ -331,6 +332,7 @@ const initDb = async () => {
 
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
+      user_id TEXT,
       contact_id TEXT,
       role TEXT,
       content TEXT,
@@ -389,6 +391,7 @@ const initDb = async () => {
 
     CREATE TABLE IF NOT EXISTS moments (
       id TEXT PRIMARY KEY,
+      user_id TEXT,
       userId TEXT,
       userName TEXT,
       userAvatar TEXT,
@@ -491,8 +494,16 @@ startServer();
 
 app.get('/api/profile', async (req, res) => {
   try {
-    const profiles = await db.all('SELECT * FROM profile');
-    res.json(profiles);
+    const userId = req.headers['x-user-id'];
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+    const profile = await db.get('SELECT * FROM profile WHERE id = ?', userId);
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+    console.log('DEBUG: /api/profile returning profile for user', userId);
+    res.json(profile);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -539,7 +550,11 @@ app.post('/api/profile', async (req, res) => {
 
 app.get('/api/contacts', async (req, res) => {
   try {
-    const contacts = await db.all('SELECT * FROM contacts');
+    const userId = req.headers['x-user-id'];
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+    const contacts = await db.all('SELECT * FROM contacts WHERE user_id = ?', userId);
     res.json(contacts);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -548,11 +563,15 @@ app.get('/api/contacts', async (req, res) => {
 
 app.post('/api/contacts', async (req, res) => {
   try {
+    const userId = req.headers['x-user-id'];
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
     const contact = req.body;
     await db.run(`
-      INSERT OR REPLACE INTO contacts (id, name, avatar, status, accountStatus, statusBadge, lastMessageSnippet, lastMessageTime, isBlocked)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, contact.id, contact.name, contact.avatar, contact.status, contact.accountStatus, contact.statusBadge, contact.lastMessageSnippet, contact.lastMessageTime, contact.isBlocked ? 1 : 0);
+      INSERT OR REPLACE INTO contacts (id, user_id, name, avatar, status, accountStatus, statusBadge, lastMessageSnippet, lastMessageTime, isBlocked)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, contact.id, userId, contact.name, contact.avatar, contact.status, contact.accountStatus, contact.statusBadge, contact.lastMessageSnippet, contact.lastMessageTime, contact.isBlocked ? 1 : 0);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -561,11 +580,15 @@ app.post('/api/contacts', async (req, res) => {
 
 app.get('/api/messages', async (req, res) => {
   try {
+    const userId = req.headers['x-user-id'];
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
     const { contact_id, limit = 2000 } = req.query;
-    let query = 'SELECT * FROM messages';
-    let params = [];
+    let query = 'SELECT * FROM messages WHERE user_id = ?';
+    let params = [userId];
     if (contact_id) {
-      query += ' WHERE contact_id = ?';
+      query += ' AND contact_id = ?';
       params.push(contact_id);
     }
     query += ' ORDER BY timestamp DESC';
@@ -582,11 +605,15 @@ app.get('/api/messages', async (req, res) => {
 
 app.post('/api/messages', async (req, res) => {
   try {
+    const userId = req.headers['x-user-id'];
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
     const message = req.body;
     await db.run(`
-      INSERT INTO messages (id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status, reply_to_id, reply_to_text)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, message.id, message.contact_id, message.role, message.content, message.timestamp, message.type, message.mediaUrl, message.fileName, message.fileSize, message.status, message.reply_to_id, message.reply_to_text);
+      INSERT INTO messages (id, user_id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status, reply_to_id, reply_to_text)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, message.id, userId, message.contact_id, message.role, message.content, message.timestamp, message.type, message.mediaUrl, message.fileName, message.fileSize, message.status, message.reply_to_id, message.reply_to_text);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -669,7 +696,11 @@ app.delete('/api/tools/:id', async (req, res) => {
 
 app.get('/api/moments', async (req, res) => {
   try {
-    const moments = await db.all('SELECT * FROM moments ORDER BY timestamp DESC');
+    const userId = req.headers['x-user-id'];
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+    const moments = await db.all('SELECT * FROM moments WHERE user_id = ? ORDER BY timestamp DESC', userId);
     res.json(moments);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -678,11 +709,15 @@ app.get('/api/moments', async (req, res) => {
 
 app.post('/api/moments', async (req, res) => {
   try {
+    const userId = req.headers['x-user-id'];
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
     const moment = req.body;
     await db.run(`
-      INSERT INTO moments (id, userId, userName, userAvatar, content, mediaUrl, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, moment.id, moment.userId, moment.userName, moment.userAvatar, moment.content, moment.mediaUrl, moment.timestamp);
+      INSERT INTO moments (id, user_id, userId, userName, userAvatar, content, mediaUrl, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, moment.id, userId, moment.userId, moment.userName, moment.userAvatar, moment.content, moment.mediaUrl, moment.timestamp);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
