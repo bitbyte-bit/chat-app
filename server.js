@@ -46,6 +46,9 @@ app.use(express.json({ limit: '100mb' }));
 
 app.use(express.static(path.join(__dirname, 'dist')));
 
+// Serve media files
+app.use('/media', express.static(path.join(__dirname, 'media')));
+
 // API endpoints
 app.post('/api/register', async (req, res) => {
   const { name, email, phone, password } = req.body;
@@ -483,10 +486,6 @@ const startServer = async () => {
   const PORT = 3001;
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Zenj Relay active on port ${PORT}`);
-    // Periodic resource monitoring
-    setInterval(() => {
-      logResources();
-    }, 60000); // Every minute
   });
 };
 
@@ -587,15 +586,30 @@ app.get('/api/messages', async (req, res) => {
     if (!userId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
+
+    // Check if user is admin
+    const userProfile = await db.get('SELECT role FROM profile WHERE id = ?', [userId]);
+    const isAdmin = userProfile && userProfile.role === 'admin';
+
     const { contact_id, limit = 2000 } = req.query;
-    let query = 'SELECT * FROM messages WHERE user_id = ?';
-    let params = [userId];
-    if (contact_id) {
-      query += ' AND contact_id = ?';
-      params.push(contact_id);
+    let query;
+    let params = [];
+
+    if (isAdmin && !contact_id) {
+      // Admin can see all messages
+      query = 'SELECT * FROM messages';
+    } else if (contact_id) {
+      // For specific contact, return messages between user and contact
+      query = 'SELECT * FROM messages WHERE ((user_id = ? AND contact_id = ?) OR (user_id = ? AND contact_id = ?))';
+      params = [userId, contact_id, contact_id, userId];
+    } else {
+      // Regular user sees messages they sent
+      query = 'SELECT * FROM messages WHERE user_id = ?';
+      params = [userId];
     }
+
     query += ' ORDER BY timestamp DESC';
-    if (limit) {
+    if (limit && limit !== 'undefined' && !isNaN(parseInt(limit))) {
       query += ' LIMIT ?';
       params.push(parseInt(limit));
     }
@@ -978,7 +992,7 @@ app.post('/api/run', async (req, res) => {
     if (!upperQuery.startsWith('INSERT') && !upperQuery.startsWith('UPDATE') && !upperQuery.startsWith('DELETE')) {
       return res.status(400).json({ error: 'Only INSERT, UPDATE, DELETE allowed' });
     }
-    await db.run(query, params);
+    await db.run(query, ...params);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1033,25 +1047,37 @@ const logResources = () => {
 };
  
 io.on('connection', (socket) => {
-  console.log(`New WebSocket connection: ${socket.id}`);
-  console.log(`Connection details - IP: ${socket.handshake.address}, User-Agent: ${socket.handshake.headers['user-agent']}`);
-  logResources();
   socket.on('error', (error) => {
     console.error(`WebSocket error for ${socket.id}:`, error);
   });
   socket.on('register', async (userId) => {
-    users.set(userId, socket.id);
-    sockets.set(socket.id, userId);
-    console.log(`User registered: ${userId}, Socket: ${socket.id}`);
-    logResources();
-    // Update directory status
-    await db.run('UPDATE directory_users SET status = ? WHERE id = ?', 'online', userId);
- 
-    io.emit('user_status', { userId, status: 'online' });
+    try {
+      // Clear any existing mappings for this user
+      const oldSocketId = users.get(userId);
+      if (oldSocketId && oldSocketId !== socket.id) {
+        sockets.delete(oldSocketId);
+      }
+
+      users.set(userId, socket.id);
+      sockets.set(socket.id, userId);
+      // Ensure user is in directory_users
+      const userProfile = await db.get('SELECT * FROM profile WHERE id = ?', [userId]);
+      if (userProfile) {
+        await db.run(`
+          INSERT OR IGNORE INTO directory_users (id, name, bio, avatar, tags, accountStatus, statusBadge, email, phone, status, accountType)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, userId, userProfile.name, userProfile.bio, userProfile.avatar, '', userProfile.accountStatus, '', userProfile.email, userProfile.phone, 'online', userProfile.accountType);
+      }
+      // Update directory status
+      await db.run('UPDATE directory_users SET status = ? WHERE id = ?', 'online', userId);
+
+      io.emit('user_status', { userId, status: 'online' });
+    } catch (error) {
+      // Don't disconnect on register error
+    }
   });
 
-  socket.on('disconnect', async () => {
-    console.log(`WebSocket disconnected: ${socket.id}`);
+  socket.on('disconnect', async (reason) => {
     const userId = sockets.get(socket.id);
     if (userId) {
       await db.run('UPDATE directory_users SET status = ? WHERE id = ?', 'offline', userId);
@@ -1059,33 +1085,48 @@ io.on('connection', (socket) => {
       users.delete(userId);
       sockets.delete(socket.id);
     }
-    logResources();
   });
+socket.on('send_message', async (data) => {
+ const senderId = data.senderId || sockets.get(socket.id);
+  const recipientId = data.recipientId;
+  const isGroup = data.isGroup || false;
 
-  socket.on('send_message', async (data) => {
-    console.log(`Message sent from ${sockets.get(socket.id)} to ${data.recipientId}, type: ${data.type}`);
-    const recipientId = data.recipientId;
-    const senderId = sockets.get(socket.id);
-    const isGroup = data.isGroup || false;
+  if (!senderId) {
+    console.error('No sender ID found for message:', data.id);
+    return;
+  }
+
+  try {
     await db.run(`
       INSERT OR IGNORE INTO messages (id, user_id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status, reply_to_id, reply_to_text)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, data.id, senderId, data.recipientId, data.role, data.content, data.timestamp, data.type, data.mediaUrl, data.fileName, data.fileSize, data.status, data.reply_to_id, data.reply_to_text);
-    if (isGroup) {
-      socket.to(recipientId).emit('receive_message', data);
-    } else {
-      const recipientSocketId = users.get(recipientId);
-      if (recipientSocketId) {
-        io.to(recipientSocketId).emit('receive_message', data);
-      }
+  } catch (e) {
+    console.error('DB error in send_message:', e.message);
+    return;
+  }
+
+  if (isGroup) {
+    socket.to(recipientId).emit('receive_message', data);
+  } else {
+    const recipientSocketId = users.get(recipientId);
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('receive_message', data);
     }
-  });
+  }
+});
 
   socket.on('send_message_chunk', async (data) => {
     const recipientId = data.recipientId;
-    const senderId = sockets.get(socket.id);
+    const senderId = data.senderId || sockets.get(socket.id);
     const isGroup = data.isGroup || false;
     const { id, chunk, chunkIndex, totalChunks } = data;
+
+    if (!senderId) {
+      console.error('No sender ID found for chunked message:', id);
+      return;
+    }
+
     if (!messageChunks.has(id)) {
       messageChunks.set(id, { chunks: [], received: 0, data });
     }

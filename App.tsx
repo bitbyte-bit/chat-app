@@ -187,8 +187,41 @@ const App: React.FC = () => {
       const socket = initSocket(userProfile.id) as any;
       socketRef.current = socket;
 
+      // Sync messages from server for offline delivery
+      const syncMessagesFromServer = async () => {
+        try {
+          const response = await fetch('/api/messages', {
+            headers: { 'x-user-id': userProfile.id }
+          });
+          if (response.ok) {
+            const serverMessages = await response.json();
+            // Process messages where this user is the recipient
+            for (const msg of serverMessages) {
+              if (msg.contact_id === userProfile.id && msg.user_id !== userProfile.id) {
+                // This is a message sent to this user (not from themselves)
+                const existing = await dbQuery("SELECT id FROM messages WHERE id = ?", [msg.id]);
+                if (!existing.length) {
+                  // Store locally as received message
+                  await dbRun(
+                    "INSERT INTO messages (id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [msg.id, msg.user_id, 'assistant', msg.content, msg.timestamp, msg.type || 'text', msg.mediaUrl, msg.fileName, msg.fileSize, 'delivered']
+                  );
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Failed to sync messages from server:', error);
+        }
+      };
+
+      // Sync messages when coming online
+      socket.on("connect", () => {
+        syncMessagesFromServer();
+      });
+
       socket.on("receive_message", async (data: any) => {
-        const timestamp = data.timestamp || Date.now();
+        const timestamp = Number(data.timestamp) || Date.now();
         const contactId = data.contact_id || data.senderId;
         await dbRun(
           "INSERT INTO messages (id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -383,7 +416,11 @@ const App: React.FC = () => {
     messageRows.sort((a: any, b: any) => a.timestamp - b.timestamp).forEach((m: any) => {
       const cId = m.contact_id;
       if (!convos[cId]) convos[cId] = [];
-      convos[cId].push({ ...m, reactions: m.reactions_json ? JSON.parse(m.reactions_json) : {} });
+      convos[cId].push({
+        ...m,
+        timestamp: Number(m.timestamp), // Ensure timestamp is a number
+        reactions: m.reactions_json ? JSON.parse(m.reactions_json) : {}
+      });
     });
     setConversations(convos);
 
@@ -667,7 +704,7 @@ const App: React.FC = () => {
               contact={activeContact}
               messages={conversations[activeContactId] || []}
               onSendMessage={handleSendMessage}
-              onMarkAsRead={(mid) => dbRun("UPDATE messages SET status='read' WHERE id=?", [mid]).then(loadDataFromDb)}
+              onMarkAsRead={(mid) => dbRun("UPDATE messages SET status='read' WHERE id=?", [mid]).then(() => loadDataFromDb())}
               onReactToMessage={() => {}}
               onDeleteMessage={handleDeleteMessage}
               onStartCall={(t) => setCall({ isActive: true, type: t, contact: activeContact })}
@@ -713,7 +750,7 @@ const App: React.FC = () => {
                   contact={activeContact}
                   messages={conversations[activeContactId] || []}
                   onSendMessage={handleSendMessage}
-                  onMarkAsRead={(mid) => dbRun("UPDATE messages SET status='read' WHERE id=?", [mid]).then(loadDataFromDb)}
+                  onMarkAsRead={(mid) => dbRun("UPDATE messages SET status='read' WHERE id=?", [mid]).then(() => loadDataFromDb())}
                   onReactToMessage={() => {}}
                   onDeleteMessage={handleDeleteMessage}
                   onStartCall={(t) => setCall({ isActive: true, type: t, contact: activeContact })}
@@ -735,7 +772,7 @@ const App: React.FC = () => {
       case AppMode.PROFILE:
         return <ProfileView profile={viewedProfile || userProfile!} onUpdate={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, p.id]).then(() => { loadDataFromDb(); setViewedProfile(null); })} onBack={() => { setMode(AppMode.STATUS); setViewedProfile(null); }} isReadOnly={!!viewedProfile} />;
       case AppMode.SETTINGS:
-        return <SettingsView profile={userProfile!} contacts={contacts} onBack={() => setMode(AppMode.CHATS)} onUpdateSettings={(s) => dbRun("UPDATE profile SET settings_json = ? WHERE id = ?", [JSON.stringify({...userProfile!.settings, ...s}), userProfile!.id]).then(loadDataFromDb)} onUpdateProfile={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, userProfile!.id]).then(loadDataFromDb)} onUpdatePassword={(p) => dbRun("UPDATE profile SET password=? WHERE id=?", [p, userProfile!.id]).then(loadDataFromDb)} onUnblockContact={() => {}} onClearData={() => { window.location.reload(); }} onOpenAdmin={() => setMode(AppMode.ADMIN_DASHBOARD)} onSwitchAccount={() => { setIsAuthenticated(false); setSelectedProfileId(null); }} onLogout={handleLogout} />;
+        return <SettingsView profile={userProfile!} contacts={contacts} onBack={() => setMode(AppMode.CHATS)} onUpdateSettings={(s) => dbRun("UPDATE profile SET settings_json = ? WHERE id = ?", [JSON.stringify({...userProfile!.settings, ...s}), userProfile!.id]).then(() => loadDataFromDb())} onUpdateProfile={(p) => dbRun("UPDATE profile SET name=?, phone=?, email=?, bio=?, avatar=?, accountType=? WHERE id=?", [p.name, p.phone, p.email, p.bio, p.avatar, p.accountType, userProfile!.id]).then(() => loadDataFromDb())} onUpdatePassword={(p) => dbRun("UPDATE profile SET password=? WHERE id=?", [p, userProfile!.id]).then(() => loadDataFromDb())} onUnblockContact={() => {}} onClearData={() => { window.location.reload(); }} onOpenAdmin={() => setMode(AppMode.ADMIN_DASHBOARD)} onSwitchAccount={() => { setIsAuthenticated(false); setSelectedProfileId(null); }} onLogout={handleLogout} />;
       case AppMode.ADMIN_DASHBOARD:
         return <AdminDashboard onBack={() => setMode(AppMode.SETTINGS)} onBroadcast={(c) => socketRef.current?.emit("broadcast", { content: c })} tools={[]} loadTools={async () => await fetch('/api/tools').then(r => r.json()).catch(() => [])} />;
       default:
@@ -799,8 +836,8 @@ const App: React.FC = () => {
       {renderAuth() || (
         <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#0b141a]">
           {call.isActive && call.contact && <LiveCallOverlay contact={call.contact} type={call.type} onEnd={() => setCall({ isActive: false, type: null, contact: null })} currentUserId={userProfile?.id || ''} />}
-          <AddFriendModal isOpen={isAddFriendModalOpen} onClose={() => setIsAddFriendModalOpen(false)} onAdd={(p) => dbRun("INSERT INTO contacts (id, name, avatar, status, lastMessageSnippet, lastMessageTime) VALUES (?, ?, ?, ?, ?, ?)", [`f-${Date.now()}`, p, `https://api.dicebear.com/7.x/avataaars/svg?seed=${p}`, 'offline', 'Hello!', Date.now()]).then(loadDataFromDb)} userName={userProfile.name} />
-          <CreateGroupModal isOpen={isCreateGroupModalOpen} onClose={() => setIsCreateGroupModalOpen(false)} contacts={contacts} onCreate={(n, m) => dbRun("INSERT INTO contacts (id, name, avatar, status, isGroup, members_json, lastMessageSnippet, lastMessageTime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [`g-${Date.now()}`, n, `https://api.dicebear.com/7.x/initials/svg?seed=${n}`, 'active', 1, JSON.stringify(m), 'Group created.', Date.now()]).then(loadDataFromDb)} />
+          <AddFriendModal isOpen={isAddFriendModalOpen} onClose={() => setIsAddFriendModalOpen(false)} onAdd={(p) => dbRun("INSERT INTO contacts (id, name, avatar, status, lastMessageSnippet, lastMessageTime) VALUES (?, ?, ?, ?, ?, ?)", [`f-${Date.now()}`, p, `https://api.dicebear.com/7.x/avataaars/svg?seed=${p}`, 'offline', 'Hello!', Date.now()]).then(() => loadDataFromDb())} userName={userProfile.name} />
+          <CreateGroupModal isOpen={isCreateGroupModalOpen} onClose={() => setIsCreateGroupModalOpen(false)} contacts={contacts} onCreate={(n, m) => dbRun("INSERT INTO contacts (id, name, avatar, status, isGroup, members_json, lastMessageSnippet, lastMessageTime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [`g-${Date.now()}`, n, `https://api.dicebear.com/7.x/initials/svg?seed=${n}`, 'active', 1, JSON.stringify(m), 'Group created.', Date.now()]).then(() => loadDataFromDb())} />
           {(notifications || []).filter(n => n.active && !dismissedNotifications.has(n.id)).slice(0, 1).map(notif => (
             <div key={notif.id} className={`bg-${notif.type === 'error' ? 'rose' : notif.type === 'warning' ? 'amber' : notif.type === 'success' ? 'emerald' : 'blue'}-500/10 border-b border-${notif.type === 'error' ? 'rose' : notif.type === 'warning' ? 'amber' : notif.type === 'success' ? 'emerald' : 'blue'}-500/20 p-4 flex items-center justify-between`}>
               <div className="flex items-center gap-3">

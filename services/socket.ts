@@ -5,11 +5,20 @@ import { io } from "socket.io-client";
 let socket: any = null;
 
 export const initSocket = (userId: string): any => {
-  // Use current host but point to the Node server port (usually 3002 in dev)
-  // Or fallback to origin if running behind a proxy
-  const SOCKET_URL = window.location.hostname === 'localhost'
-    ? "http://localhost:3001"
-    : window.location.origin;
+  // If socket already exists and is connected, reuse it
+  if (socket && socket.connected) {
+    console.log('Reusing existing connected socket');
+    return socket;
+  }
+
+  // Disconnect existing socket if it exists
+  if (socket) {
+    console.log('Disconnecting existing socket');
+    socket.disconnect();
+  }
+
+  // Use current host - proxy in development, direct in production
+  const SOCKET_URL = window.location.origin;
 
   console.log('Attempting WebSocket connection to:', SOCKET_URL);
   console.log('Current location:', window.location.href);
@@ -17,13 +26,19 @@ export const initSocket = (userId: string): any => {
   // Cast options to any to fix property existence errors in the build environment
   socket = io(SOCKET_URL, {
     autoConnect: true,
-    transports: ['websocket']
+    transports: ['websocket', 'polling'] // Prefer websocket, fallback to polling
   } as any);
 
   // Access .on via the any-typed socket variable to resolve property missing errors
   socket.on("connect", () => {
     console.log("Zenj Relay Connected:", socket?.id);
     // Register the user with the server
+    socket?.emit('register', userId);
+  });
+
+  socket.on("reconnect", () => {
+    console.log("Zenj Relay Reconnected:", socket?.id);
+    // Re-register the user with the server
     socket?.emit('register', userId);
   });
 
@@ -35,13 +50,17 @@ export const initSocket = (userId: string): any => {
     console.log("WebSocket disconnected:", reason);
   });
 
+  socket.on("error", (error) => {
+    console.error("WebSocket error:", error);
+  });
+
   return socket;
 };
 
 export const getSocket = () => socket;
 
 export const emitMessage = (messageData: any) => {
-  if (socket) {
+  if (socket && socket.connected) {
     if (messageData.type?.startsWith('webrtc-')) {
       socket.emit(messageData.type, messageData);
     } else {
@@ -63,6 +82,8 @@ export const emitMessage = (messageData: any) => {
         socket.emit("send_message", messageData);
       }
     }
+  } else {
+    console.log('Socket not connected, cannot send message');
   }
 };
 
