@@ -8,10 +8,10 @@ const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:30
 
 export let db: any = null;
 
-const safeFetch = async (url: string, options?: RequestInit) => {
+const safeFetch = async (url: string, options?: RequestInit, timeoutMs: number = 10000) => {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(timeoutId);
 
@@ -139,6 +139,15 @@ export const dbRun = async (query: string, params: any[] = []) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ accountStatus: status, statusBadge: badge })
+    });
+  }
+
+  if (query.startsWith("UPDATE directory_users SET status")) {
+    // Direct update for status (online/offline), use /api/run
+    await safeFetch(`${API_BASE}/api/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, params })
     });
   }
 
