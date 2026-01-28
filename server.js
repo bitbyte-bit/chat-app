@@ -1060,13 +1060,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('send_message', async (data) => {
-    console.log(`Message sent from ${sockets.get(socket.id)} to ${data.contact_id}, type: ${data.type}`);
-    const recipientId = data.contact_id;
+    console.log(`Message sent from ${sockets.get(socket.id)} to ${data.recipientId}, type: ${data.type}`);
+    const recipientId = data.recipientId;
+    const senderId = sockets.get(socket.id);
     const isGroup = data.isGroup || false;
     await db.run(`
-      INSERT OR IGNORE INTO messages (id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status, reply_to_id, reply_to_text)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, data.id, data.contact_id, data.role, data.content, data.timestamp, data.type, data.mediaUrl, data.fileName, data.fileSize, data.status, data.reply_to_id, data.reply_to_text);
+      INSERT OR IGNORE INTO messages (id, user_id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status, reply_to_id, reply_to_text)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, data.id, senderId, data.recipientId, data.role, data.content, data.timestamp, data.type, data.mediaUrl, data.fileName, data.fileSize, data.status, data.reply_to_id, data.reply_to_text);
     if (isGroup) {
       socket.to(recipientId).emit('receive_message', data);
     } else {
@@ -1078,7 +1079,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('send_message_chunk', async (data) => {
-    const recipientId = data.contact_id;
+    const recipientId = data.recipientId;
+    const senderId = sockets.get(socket.id);
     const isGroup = data.isGroup || false;
     const { id, chunk, chunkIndex, totalChunks } = data;
     if (!messageChunks.has(id)) {
@@ -1093,9 +1095,9 @@ io.on('connection', (socket) => {
       const fullData = { ...msgData.data, mediaUrl: fullMediaUrl };
       // Process as normal
       await db.run(`
-        INSERT OR IGNORE INTO messages (id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status, reply_to_id, reply_to_text)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, fullData.id, fullData.contact_id, fullData.role, fullData.content, fullData.timestamp, fullData.type, fullData.mediaUrl, fullData.fileName, fullData.fileSize, fullData.status, fullData.reply_to_id, fullData.reply_to_text);
+        INSERT OR IGNORE INTO messages (id, user_id, contact_id, role, content, timestamp, type, mediaUrl, fileName, fileSize, status, reply_to_id, reply_to_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, fullData.id, senderId, fullData.recipientId, fullData.role, fullData.content, fullData.timestamp, fullData.type, fullData.mediaUrl, fullData.fileName, fullData.fileSize, fullData.status, fullData.reply_to_id, fullData.reply_to_text);
       if (isGroup) {
         socket.to(recipientId).emit('receive_message', fullData);
       } else {

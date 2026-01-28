@@ -333,7 +333,7 @@ const App: React.FC = () => {
       dbQuery("SELECT * FROM contacts ORDER BY lastMessageTime DESC"),
       dbQuery("SELECT * FROM directory_users"),
       dbQuery("SELECT * FROM moments ORDER BY timestamp DESC LIMIT 100"),
-      fetch('/api/notifications').then(r => r.json()).catch(() => [])
+      fetch('/api/notifications').then(r => r.ok ? r.json() : []).catch(() => [])
     ]);
 
     // Load all available profiles
@@ -395,7 +395,8 @@ const App: React.FC = () => {
 
     setDirectoryUsers(dirRows);
     setMoments(momentRows);
-    setNotifications(notifRows);
+    console.log('notifRows:', notifRows);
+    setNotifications(Array.isArray(notifRows) ? notifRows : []);
   };
 
   const handleRegister = async (data: any) => {
@@ -789,7 +790,7 @@ const App: React.FC = () => {
           {call.isActive && call.contact && <LiveCallOverlay contact={call.contact} type={call.type} onEnd={() => setCall({ isActive: false, type: null, contact: null })} currentUserId={userProfile?.id || ''} />}
           <AddFriendModal isOpen={isAddFriendModalOpen} onClose={() => setIsAddFriendModalOpen(false)} onAdd={(p) => dbRun("INSERT INTO contacts (id, name, avatar, status, lastMessageSnippet, lastMessageTime) VALUES (?, ?, ?, ?, ?, ?)", [`f-${Date.now()}`, p, `https://api.dicebear.com/7.x/avataaars/svg?seed=${p}`, 'offline', 'Hello!', Date.now()]).then(loadDataFromDb)} userName={userProfile.name} />
           <CreateGroupModal isOpen={isCreateGroupModalOpen} onClose={() => setIsCreateGroupModalOpen(false)} contacts={contacts} onCreate={(n, m) => dbRun("INSERT INTO contacts (id, name, avatar, status, isGroup, members_json, lastMessageSnippet, lastMessageTime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [`g-${Date.now()}`, n, `https://api.dicebear.com/7.x/initials/svg?seed=${n}`, 'active', 1, JSON.stringify(m), 'Group created.', Date.now()]).then(loadDataFromDb)} />
-          {notifications.filter(n => n.active && !dismissedNotifications.has(n.id)).slice(0, 1).map(notif => (
+          {(notifications || []).filter(n => n.active && !dismissedNotifications.has(n.id)).slice(0, 1).map(notif => (
             <div key={notif.id} className={`bg-${notif.type === 'error' ? 'rose' : notif.type === 'warning' ? 'amber' : notif.type === 'success' ? 'emerald' : 'blue'}-500/10 border-b border-${notif.type === 'error' ? 'rose' : notif.type === 'warning' ? 'amber' : notif.type === 'success' ? 'emerald' : 'blue'}-500/20 p-4 flex items-center justify-between`}>
               <div className="flex items-center gap-3">
                 <div className={`w-2 h-2 rounded-full bg-${notif.type === 'error' ? 'rose' : notif.type === 'warning' ? 'amber' : notif.type === 'success' ? 'emerald' : 'blue'}-500`}></div>
