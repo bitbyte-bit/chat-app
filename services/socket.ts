@@ -10,7 +10,10 @@ export const initSocket = (userId: string): any => {
   const SOCKET_URL = window.location.hostname === 'localhost'
     ? "http://localhost:3001"
     : window.location.origin;
-  
+
+  console.log('Attempting WebSocket connection to:', SOCKET_URL);
+  console.log('Current location:', window.location.href);
+
   // Cast options to any to fix property existence errors in the build environment
   socket = io(SOCKET_URL, {
     autoConnect: true,
@@ -22,6 +25,14 @@ export const initSocket = (userId: string): any => {
     console.log("Zenj Relay Connected:", socket?.id);
     // Register the user with the server
     socket?.emit('register', userId);
+  });
+
+  socket.on("connect_error", (error) => {
+    console.error("WebSocket connection error:", error);
+  });
+
+  socket.on("disconnect", (reason) => {
+    console.log("WebSocket disconnected:", reason);
   });
 
   return socket;

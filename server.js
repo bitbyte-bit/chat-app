@@ -1031,6 +1031,7 @@ const logResources = () => {
  
 io.on('connection', (socket) => {
   console.log(`New WebSocket connection: ${socket.id}`);
+  console.log(`Connection details - IP: ${socket.handshake.address}, User-Agent: ${socket.handshake.headers['user-agent']}`);
   logResources();
   socket.on('error', (error) => {
     console.error(`WebSocket error for ${socket.id}:`, error);
